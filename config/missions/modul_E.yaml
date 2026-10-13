@@ -1,0 +1,17 @@
+# SAMPLE mission — simulated data only (Phase 1 prototype).
+#
+# This mirrors the mission schema in the architecture document
+# ("Skema konfigurasi" -> missions/modul_E.yaml). The Phase 1 dashboard does not
+# read this file yet; the sample missions are defined in
+# src/amr_core/samples.py. This file documents the intended on-disk format and
+# is a placeholder for a future mission loader.
+
+mission: modul_E
+version: 1
+time_limit_s: 600
+reserve_for_home_s: 60
+start: physical_button
+steps:
+  - for_each: {targets: [T3, T1, T4, T2]}
+    do: {skill: go_to, timeout_s: 90, retry: 2, on_fail: skip}
+  - {skill: return_home, timeout_s: 90}

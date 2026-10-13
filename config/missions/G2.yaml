@@ -1,0 +1,18 @@
+# SAMPLE mission — simulated data only (Phase 1 prototype).
+#
+# Mirrors the G2 example in the architecture document (perception picks the
+# destination at run time). Not read by the Phase 1 dashboard yet; see
+# src/amr_core/samples.py.
+
+mission: G2
+version: 1
+time_limit_s: 600
+reserve_for_home_s: 60
+steps:
+  - {skill: go_to, target: stand_1}
+  - {skill: align_reference_line, target: stand_1}
+  - {skill: detect_object, save_as: obj}
+  - {skill: pick, retry: 1}
+  - {skill: go_to, target: "rack_for(obj.color)"}
+  - {skill: place, slot: "slot_for(obj.color)"}
+  - {skill: return_home}

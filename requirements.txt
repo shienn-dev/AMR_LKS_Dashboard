@@ -1,0 +1,8 @@
+# Runtime dependencies for the AMR LKS dashboard prototype (Phase 1).
+# Install once, then the dashboard runs fully offline.
+nicegui>=2.0,<4.0
+pyyaml>=6.0
+
+# Development / verification tools.
+pytest>=8.0
+ruff>=0.6
