@@ -7,8 +7,10 @@ Design notes
 ------------
 - UI is kept separate from state/mission logic (``amr_core``).
 - One application, two modes (DASH-01). Competition mode locks/hides features.
-- A single bounded ``ui.timer`` (2 Hz) advances the simulation and refreshes the
-  view. It can be stopped; the model owns no background task.
+- The mission is advanced by exactly ONE server-side loop
+  (``amr_dashboard.runtime.start_server_loop``), started on app startup. The
+  per-page ``ui.timer`` only refreshes the view; it never advances the runtime,
+  so adding browsers does not add advancement loops.
 - No motion controls exist in competition mode (DASH-04).
 """
 
@@ -16,17 +18,17 @@ from __future__ import annotations
 
 import random
 
-from nicegui import ui
+from nicegui import app, ui
 
 from amr_core.mission import MissionConfig, validate_mission
+from amr_core.mission_runner import mission_status
 from amr_core.samples import SAMPLE_MISSIONS, get_sample_mission
-from amr_core.simulation import SimulationEngine
 from amr_core.states import RobotState
 from amr_core.vision import sample_detections
 from amr_dashboard import panels
+from amr_dashboard.runtime import get_runtime, start_server_loop, stop_server_loop
 
-TICK_INTERVAL_S = 0.5
-TICK_DT_S = 2.0  # simulated seconds advanced per tick (bounded)
+TICK_INTERVAL_S = 0.5  # per-page display refresh interval (seconds)
 
 
 class DashboardState:
@@ -41,16 +43,18 @@ class DashboardState:
     """
 
     def __init__(self) -> None:
-        self.rng = random.Random(2026)  # deterministic sample data
-        # Construct in BOOT (auto_check=False) so the first render can show the
-        # BOOT state; the first tick completes the health check deterministically.
-        self.engine = SimulationEngine(auto_check=False)
+        self.rng = random.Random(2026)  # deterministic sample data (for the draft)
+        # Use the process-wide runtime engine so mission execution does NOT
+        # depend on a browser connection (Opsi A). Two browser pages share the
+        # same engine and runner; closing one does not stop the mission.
+        runtime = get_runtime()
+        self.runtime = runtime
+        self.engine = runtime.engine
         self.mode = "competition"
         first = get_sample_mission(SAMPLE_MISSIONS[0].mission_id)
         assert first is not None
         self.draft: MissionConfig = first.sample_config(self.rng)
-        # Active mission is a separate object; the draft starts equal to it.
-        self.engine.mission = self.draft.copy()
+        self.runner = runtime.runner
         # Event-log cursor: the highest event sequence number already shown.
         # Starts at 0 so a fresh page displays every retained event once.
         self.log_cursor = 0
@@ -67,6 +71,7 @@ def main_page() -> None:
     # `.refresh()` re-renders only that region in place (no body.clear()).
     monitor = ui.refreshable(lambda: _render_monitor(state))
     mission_panel = ui.refreshable(lambda: _render_mission_config(state))
+    mission_log = ui.refreshable(lambda: _render_mission_log(state))
 
     with ui.column().classes("w-full max-w-6xl mx-auto gap-3 p-3"):
         panels.simulation_banner()
@@ -76,21 +81,26 @@ def main_page() -> None:
         # Competition/Development mode). Read-only content updates in place, so
         # the 2 Hz tick no longer destroys interactive widgets (F9).
         structure = ui.column().classes("w-full gap-3")
-        _render_structure(structure, state, monitor, mission_panel)
+        _render_structure(structure, state, monitor, mission_panel, mission_log)
 
         # A single persistent, append-only event log shared by both modes.
         ui.label("Event log (simulated)").classes("text-sm text-gray-500 uppercase")
         log = panels.event_log(max_lines=300)
         state.log_cursor = panels.append_events(log, state.engine, state.log_cursor)
 
+        # Per-page timer: refresh the view only. It never advances the runtime.
         timer = ui.timer(
             TICK_INTERVAL_S,
-            lambda: _on_tick(structure, log, state, monitor, mission_panel),
+            lambda: _on_tick(structure, log, state, monitor, mission_panel, mission_log),
             active=True,
         )
 
     with ui.page_sticky(position="bottom-right"):
-        ui.button("Pause simulated run", icon="pause", on_click=timer.deactivate).props("outline")
+        # Pauses only this browser's display refresh; the mission keeps running
+        # on the server (single runtime loop).
+        ui.button("Pause display refresh", icon="pause", on_click=timer.deactivate).props(
+            "outline"
+        )
 
 
 def _render_structure(
@@ -98,6 +108,7 @@ def _render_structure(
     state: DashboardState,
     monitor: ui.refreshable,
     mission_panel: ui.refreshable,
+    mission_log: ui.refreshable,
 ) -> None:
     """Build (or rebuild) the page layout. Called on page load and layout change."""
     structure.clear()
@@ -110,6 +121,7 @@ def _render_structure(
                 _render_development_side(state)
         mission_panel()
         _render_vision_panel()
+        mission_log()
 
 
 def _on_tick(
@@ -118,20 +130,22 @@ def _on_tick(
     state: DashboardState,
     monitor: ui.refreshable,
     mission_panel: ui.refreshable,
+    mission_log: ui.refreshable,
 ) -> None:
-    # Complete the simulated boot check on the first tick (deterministic, once).
-    state.engine.run_health_check()
-    state.engine.tick(TICK_DT_S)
+    # REFRESH ONLY. The mission is advanced by the single server-side loop in
+    # amr_dashboard.runtime; the page must never call runtime.step()/engine.tick()
+    # or each connected browser would add another advancement loop.
 
     # Rebuild the layout only when its structure changed (e.g. mode switch).
     signature = layout_signature(state)
     if signature != state.layout_signature:
         state.layout_signature = signature
-        _render_structure(structure, state, monitor, mission_panel)
+        _render_structure(structure, state, monitor, mission_panel, mission_log)
     else:
         # Update read-only regions in place instead of clearing the whole body.
         monitor.refresh()
         mission_panel.refresh()
+        mission_log.refresh()
 
     state.log_cursor = panels.append_events(log, state.engine, state.log_cursor)
 
@@ -163,6 +177,18 @@ def _build_header(state: DashboardState) -> None:
 
 def _set_mode(state: DashboardState, mode: str) -> None:
     state.mode = mode
+
+
+def _render_mission_log(state: DashboardState) -> None:
+    """Read-only structured mission log (Phase 2). No mission logic here."""
+    with ui.card().classes("w-full"):
+        ui.label("Structured mission log").classes("text-sm text-gray-500 uppercase")
+        ui.label(
+            "Per-step records from the mock mission runner (typed log, not the "
+            "event log above)."
+        ).classes("text-xs text-gray-500")
+        status = mission_status(state.engine.runner)  # type: ignore[arg-type]
+        panels.mission_log_panel(status)
 
 
 # --------------------------------------------------------------------------- #
@@ -481,6 +507,24 @@ def _render_vision_panel() -> None:
                     with ui.row().classes("items-center gap-2"):
                         ui.icon("category").classes("text-slate-500")
                         ui.label(det.display).classes("text-sm font-mono")
+
+
+def _start_runtime_loop() -> None:
+    """Start the single server-side advancement loop (runs without any browser).
+
+    Idempotent: called once per application process on startup. It does not run
+    per page/browser, so opening more clients adds no advancement loops.
+    """
+    start_server_loop()
+
+
+def _stop_runtime_loop() -> None:
+    """Cancel the server-side loop on application shutdown."""
+    stop_server_loop()
+
+
+app.on_startup(_start_runtime_loop)
+app.on_shutdown(_stop_runtime_loop)
 
 
 def run(host: str = "127.0.0.1", port: int = 8080, reload: bool = False) -> None:

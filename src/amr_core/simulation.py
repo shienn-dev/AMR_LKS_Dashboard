@@ -123,6 +123,10 @@ class SimulationEngine:
     # BOOT before the check finishes.
     auto_check: bool = True
     _boot_completed: bool = False
+    # Phase 2: an optional mission runner. When attached, ``tick`` delegates
+    # mission advancement to it; when absent, the legacy synthetic cadence is
+    # used (kept for backward compatibility with Phase 1 callers/tests).
+    runner: object | None = None
 
     # -- setup ---------------------------------------------------------------
 
@@ -214,6 +218,17 @@ class SimulationEngine:
         # only updates the health map; the BOOT -> READY/FAULT decision belongs
         # to run_health_check(). All other states transition as documented.
         if self.state is not RobotState.BOOT and not ok and item.critical:
+            # During a run (RUNNING -> FAILED, OPS-11), cancel the active skill
+            # BEFORE the transition, exactly like ``tick`` does, so no skill is
+            # left running after the mission is FAILED. The transition is
+            # RUNNING -> FAILED only when the engine is RUNNING; for pre-run
+            # states (READY -> FAULT, OPS-02) there is no mission running, so no
+            # abort is needed. Only abort when a runner is attached and the run
+            # actually started, to preserve behaviour without a runner.
+            if self.state is RobotState.RUNNING and self.runner is not None:
+                failures = self._critical_failures()
+                names = ", ".join(h.label for h in failures)
+                self.runner.abort(f"health:{names}")  # type: ignore[attr-defined]
             result = self._apply(Action.HEALTH_FAILED)
             if result.changed:
                 self.last_reason = f"Critical component failed: {item.label}"
@@ -299,6 +314,7 @@ class SimulationEngine:
             self.step_index = 0
             self.history.clear()
             self.steps = list(mission.target_order) + ["return_home"]
+            self._start_runner(mission)
             self.log(
                 f"Simulated START accepted (software only, robot NOT actually "
                 f"started). Mission '{mission.display_name}' RUNNING."
@@ -335,12 +351,48 @@ class SimulationEngine:
 
         result = self._apply(Action.RESET)
         if result.allowed:
+            # Cancel any active skill BEFORE the transition settles, so no skill
+            # keeps running in READY (Phase 2 contract).
+            self._abort_runner("reset")
             self.elapsed_s = 0.0
             self.step_index = 0
             self.history.clear()
             self.last_reason = ""
             self.log("Simulated RESET. State -> READY. Pose set to home (simulated).")
         return result
+
+    # -- mission runner (Phase 2) -------------------------------------------
+
+    def attach_runner(self, runner: object) -> None:
+        """Attach a mission runner. ``tick`` then delegates advancement to it."""
+        self.runner = runner
+
+    def _start_runner(self, mission: MissionConfig) -> None:
+        runner = self.runner
+        if runner is None:
+            return
+        from amr_core.mission import spec_from_config
+
+        spec = spec_from_config(mission)
+        runner.configure(spec)  # type: ignore[attr-defined]
+        runner.start(0.0)  # type: ignore[attr-defined]
+
+    def _abort_runner(self, reason: str) -> None:
+        runner = self.runner
+        if runner is not None and getattr(runner, "state", None) is not None:
+            runner.abort(reason)  # type: ignore[attr-defined]
+            runner.reset()  # type: ignore[attr-defined]
+
+    def _step_runner(self, dt_s: float) -> None:
+        """Delegate advancement to the runner, mapping its outcome to state."""
+        runner = self.runner
+        self.elapsed_s += dt_s
+        outcome = runner.step_once(self.elapsed_s)  # type: ignore[attr-defined]
+        name = outcome.value if hasattr(outcome, "value") else str(outcome)
+        if name == "DONE":
+            self.complete_mission()
+        elif name == "FAIL":
+            self.fail_mission(runner.terminal_reason or "mission failed")  # type: ignore[attr-defined]
 
     # -- progress ------------------------------------------------------------
 
@@ -371,8 +423,8 @@ class SimulationEngine:
 
         Only RUNNING advances. A critical component failure detected during the
         run stops the mission (state -> FAILED) before any further progress, per
-        OPS-11. Otherwise, reaching the end goes DONE; hitting the time limit
-        goes FAILED.
+        OPS-11. When a mission runner is attached, advancement is delegated to
+        it; otherwise the legacy synthetic cadence is used.
         """
         if self.state is not RobotState.RUNNING or self.mission is None:
             return
@@ -380,13 +432,19 @@ class SimulationEngine:
             return
 
         # Run-time health re-check: never keep progressing with a failed
-        # critical component.
+        # critical component. Cancel the active skill BEFORE the transition.
         failures = self._critical_failures()
         if failures:
             names = ", ".join(h.label for h in failures)
+            if self.runner is not None:
+                self.runner.abort(f"health:{names}")  # type: ignore[attr-defined]
             self._apply(Action.HEALTH_FAILED)
             self.last_reason = f"Critical component failed during run: {names}"
             self.log(f"Run stopped: critical component failed ({names}). Mission FAILED.")
+            return
+
+        if self.runner is not None:
+            self._step_runner(dt_s)
             return
 
         self.elapsed_s += dt_s

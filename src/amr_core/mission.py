@@ -150,3 +150,99 @@ def _validate_rack_colors(colors: dict[str, str]) -> list[ValidationIssue]:
 
 def is_valid(config: MissionConfig) -> bool:
     return not validate_mission(config)
+
+
+# --------------------------------------------------------------------------- #
+# Phase 2 — mission spec (parsed mission with steps)
+# --------------------------------------------------------------------------- #
+#
+# ``MissionConfig`` above stays the Phase 1 configuration object used by the
+# dashboard draft. ``MissionSpec`` is the Phase 2 parsed form consumed by the
+# mission runner. It is additive: nothing in Phase 1 depends on it.
+
+# Skills known to the mock runner. Values are the skill names allowed in a
+# mission file. Kept small and explicit; real skills are added to the
+# architecture catalogue first, then here.
+KNOWN_SKILLS: tuple[str, ...] = ("go_to", "return_home", "wait_for_start")
+
+# Skills that require a ``target`` point.
+SKILLS_REQUIRING_TARGET: tuple[str, ...] = ("go_to",)
+
+# Allowed ``on_fail`` values.
+ON_FAIL_SKIP = "skip"
+ON_FAIL_FAIL = "fail"
+ALLOWED_ON_FAIL: tuple[str, ...] = (ON_FAIL_SKIP, ON_FAIL_FAIL)
+
+# Reserved skill name for returning home; the runner prioritizes this step.
+RETURN_HOME_SKILL = "return_home"
+
+
+@dataclass(frozen=True)
+class StepSpec:
+    """One parsed mission step (a single executable action).
+
+    ``retry`` is the number of *additional* attempts after the first, so
+    ``retry=0`` means one attempt, ``retry=1`` two, etc.
+    """
+
+    step_id: str
+    skill: str
+    timeout_s: float
+    retry: int = 0
+    on_fail: str = ON_FAIL_FAIL
+    target: str | None = None
+
+
+@dataclass(frozen=True)
+class MissionSpec:
+    """A parsed, validated mission ready for the runner."""
+
+    mission_id: str
+    version: int
+    time_limit_s: int
+    reserve_for_home_s: int
+    steps: tuple[StepSpec, ...]
+    start: str = "physical_button"
+
+    @property
+    def display_name(self) -> str:
+        return self.mission_id
+
+
+def spec_from_config(config: MissionConfig, *, default_timeout_s: float = 90.0) -> MissionSpec:
+    """Build a runnable :class:`MissionSpec` from a Phase 1 :class:`MissionConfig`.
+
+    The dashboard's sample missions carry a target order and rack colors but no
+    per-step timeout/retry (that lives in the mission YAML of the real system).
+    This adapter turns the target order into ``go_to`` steps followed by a
+    ``return_home`` step, using a default step timeout. It is a *compatibility*
+    adapter for the mock; the YAML loader is the real source of ``MissionSpec``.
+    """
+    steps: list[StepSpec] = []
+    for i, target in enumerate(config.target_order):
+        steps.append(
+            StepSpec(
+                step_id=f"s{i}",
+                skill="go_to",
+                timeout_s=default_timeout_s,
+                retry=0,
+                on_fail=ON_FAIL_FAIL,
+                target=target,
+            )
+        )
+    steps.append(
+        StepSpec(
+            step_id=f"s{len(steps)}",
+            skill=RETURN_HOME_SKILL,
+            timeout_s=default_timeout_s,
+            retry=0,
+            on_fail=ON_FAIL_FAIL,
+        )
+    )
+    return MissionSpec(
+        mission_id=config.mission_id,
+        version=config.version,
+        time_limit_s=config.time_limit_s,
+        reserve_for_home_s=config.reserve_for_home_s,
+        steps=tuple(steps),
+    )

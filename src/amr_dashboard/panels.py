@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from nicegui import ui
 
+from amr_core.mission_runner import MissionStatus
 from amr_core.simulation import SimulationEngine
 from amr_core.states import RobotState
 from amr_dashboard.theme import (
@@ -115,3 +116,33 @@ def append_events(log: ui.log, engine: SimulationEngine, since_seq: int) -> int:
         log.push(event.render())
         cursor = event.seq
     return cursor
+
+
+def mission_log_panel(status: MissionStatus | None) -> None:
+    """Render the structured mission log (read-only).
+
+    Shows one row per structured record (step id, skill, attempt, outcome,
+    reason, duration). This is the *typed* per-step log, distinct from the
+    human-readable event log above.
+    """
+    if status is None:
+        ui.label("No mission runner attached (legacy simulation path).").classes(
+            "text-xs text-gray-500"
+        )
+        return
+
+    if status.terminal_reason:
+        ui.label(f"Terminal: {status.terminal_reason}").classes("text-xs text-red-700")
+
+    if not status.records:
+        ui.label("No steps recorded yet.").classes("text-xs text-gray-500")
+        return
+
+    with ui.column().classes("w-full gap-0"):
+        for rec in status.records:
+            duration = f"{rec.duration_s:.0f}s" if rec.duration_s is not None else "-"
+            flag = " [incomplete]" if rec.incomplete else ""
+            ui.label(
+                f"{rec.step_id}  {rec.skill}  attempt {rec.attempt}  "
+                f"-> {rec.outcome}{flag}  ({rec.reason}, {duration})"
+            ).classes("text-xs font-mono text-gray-700")
