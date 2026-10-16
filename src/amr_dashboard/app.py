@@ -1,4 +1,4 @@
-"""NiceGUI dashboard entry point (Phase 1 prototype).
+"""NiceGUI dashboard entry point (Phase 1 prototype + audit-phase robot panels).
 
 Run with:  python -m amr_dashboard
 or:        python run_dashboard.py
@@ -12,6 +12,9 @@ Design notes
   per-page ``ui.timer`` only refreshes the view; it never advances the runtime,
   so adding browsers does not add advancement loops.
 - No motion controls exist in competition mode (DASH-04).
+- Robot hardware panels (camera, odometry, chassis, arm) use the offline adapters
+  in ``amr_dashboard.robot_runtime``; they report honest availability and never
+  transmit a command or fabricate data (see ``docs/robot_integration.md``).
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ from amr_core.mission_runner import mission_status
 from amr_core.samples import SAMPLE_MISSIONS, get_sample_mission
 from amr_core.states import RobotState
 from amr_core.vision import sample_detections
-from amr_dashboard import lidar_panel, lidar_runtime, panels
+from amr_dashboard import lidar_panel, lidar_runtime, panels, robot_panel, robot_runtime
 from amr_dashboard.runtime import get_runtime, start_server_loop, stop_server_loop
 
 TICK_INTERVAL_S = 0.5  # per-page display refresh interval (seconds)
@@ -76,6 +79,7 @@ def main_page() -> None:
     lidar_view = ui.refreshable(
         lambda: lidar_panel.lidar_panel(lidar_runtime.get_lidar_reader())
     )
+    robot_view = ui.refreshable(lambda: robot_panel.robot_panels(robot_runtime.get_adapters()))
 
     with ui.column().classes("w-full max-w-6xl mx-auto gap-3 p-3"):
         panels.simulation_banner()
@@ -85,7 +89,9 @@ def main_page() -> None:
         # Competition/Development mode). Read-only content updates in place, so
         # the 2 Hz tick no longer destroys interactive widgets (F9).
         structure = ui.column().classes("w-full gap-3")
-        _render_structure(structure, state, monitor, mission_panel, mission_log, lidar_view)
+        _render_structure(
+            structure, state, monitor, mission_panel, mission_log, lidar_view, robot_view
+        )
 
         # A single persistent, append-only event log shared by both modes.
         ui.label("Event log (simulated)").classes("text-sm text-gray-500 uppercase")
@@ -96,7 +102,7 @@ def main_page() -> None:
         timer = ui.timer(
             TICK_INTERVAL_S,
             lambda: _on_tick(
-                structure, log, state, monitor, mission_panel, mission_log, lidar_view
+                structure, log, state, monitor, mission_panel, mission_log, lidar_view, robot_view
             ),
             active=True,
         )
@@ -116,6 +122,7 @@ def _render_structure(
     mission_panel: ui.refreshable,
     mission_log: ui.refreshable,
     lidar_view: ui.refreshable,
+    robot_view: ui.refreshable,
 ) -> None:
     """Build (or rebuild) the page layout. Called on page load and layout change."""
     structure.clear()
@@ -128,6 +135,7 @@ def _render_structure(
                 _render_development_side(state)
         mission_panel()
         lidar_view()
+        robot_view()
         _render_vision_panel()
         mission_log()
 
@@ -140,6 +148,7 @@ def _on_tick(
     mission_panel: ui.refreshable,
     mission_log: ui.refreshable,
     lidar_view: ui.refreshable,
+    robot_view: ui.refreshable,
 ) -> None:
     # REFRESH ONLY. The mission is advanced by the single server-side loop in
     # amr_dashboard.runtime; the page must never call runtime.step()/engine.tick()
@@ -149,13 +158,16 @@ def _on_tick(
     signature = layout_signature(state)
     if signature != state.layout_signature:
         state.layout_signature = signature
-        _render_structure(structure, state, monitor, mission_panel, mission_log, lidar_view)
+        _render_structure(
+            structure, state, monitor, mission_panel, mission_log, lidar_view, robot_view
+        )
     else:
         # Update read-only regions in place instead of clearing the whole body.
         monitor.refresh()
         mission_panel.refresh()
         mission_log.refresh()
         lidar_view.refresh()
+        robot_view.refresh()
 
     state.log_cursor = panels.append_events(log, state.engine, state.log_cursor)
 
@@ -497,26 +509,22 @@ def _validate_apply(state: DashboardState) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Vision panel (placeholder + simulated detections)
+# Vision panel (simulated detections only — real camera status is separate)
 # --------------------------------------------------------------------------- #
 
 def _render_vision_panel() -> None:
     with ui.card().classes("w-full"):
         with ui.row().classes("items-center gap-3"):
-            ui.label("Vision").classes("text-sm text-gray-500 uppercase")
-            ui.badge("PLACEHOLDER — NOT A LIVE CAMERA FEED").props("color=amber-8 text-color=black")
-        with ui.row().classes("w-full gap-4"):
-            with ui.column().classes(
-                "w-64 h-40 items-center justify-center bg-slate-200 rounded"
-            ):
-                ui.icon("videocam_off").classes("text-4xl text-slate-500")
-                ui.label("Camera feed placeholder").classes("text-xs text-slate-600")
-            with ui.column().classes("gap-0"):
-                ui.label("Sample detections (simulated)").classes("text-xs text-gray-500")
-                for det in sample_detections():
-                    with ui.row().classes("items-center gap-2"):
-                        ui.icon("category").classes("text-slate-500")
-                        ui.label(det.display).classes("text-sm font-mono")
+            ui.label("Vision (simulated)").classes("text-sm text-gray-500 uppercase")
+            ui.badge("SIMULATED SAMPLE DATA").props("color=amber-8 text-color=black")
+        ui.label(
+            "Simulated sample detections for the prototype. The real camera status is "
+            "shown in the 'Camera (robot)' panel above."
+        ).classes("text-xs text-gray-500")
+        for det in sample_detections():
+            with ui.row().classes("items-center gap-2"):
+                ui.icon("category").classes("text-slate-500")
+                ui.label(det.display).classes("text-sm font-mono")
 
 
 def _start_runtime_loop() -> None:
