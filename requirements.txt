@@ -3,6 +3,11 @@
 nicegui>=2.0,<4.0
 pyyaml>=6.0
 
+# Live LiDAR (STL-19P / LD19) over USB-serial. Optional: the dashboard runs
+# fine without it, but the LiDAR panel then reports "unavailable" instead of
+# reading the hardware. See docs/lidar_integration.md.
+pyserial>=3.5
+
 # Development / verification tools.
 pytest>=8.0
 ruff>=0.6

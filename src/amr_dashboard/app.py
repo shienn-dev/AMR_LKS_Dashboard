@@ -20,12 +20,13 @@ import random
 
 from nicegui import app, ui
 
+from amr_core.lidar.config import LidarConfig
 from amr_core.mission import MissionConfig, validate_mission
 from amr_core.mission_runner import mission_status
 from amr_core.samples import SAMPLE_MISSIONS, get_sample_mission
 from amr_core.states import RobotState
 from amr_core.vision import sample_detections
-from amr_dashboard import panels
+from amr_dashboard import lidar_panel, lidar_runtime, panels
 from amr_dashboard.runtime import get_runtime, start_server_loop, stop_server_loop
 
 TICK_INTERVAL_S = 0.5  # per-page display refresh interval (seconds)
@@ -72,6 +73,9 @@ def main_page() -> None:
     monitor = ui.refreshable(lambda: _render_monitor(state))
     mission_panel = ui.refreshable(lambda: _render_mission_config(state))
     mission_log = ui.refreshable(lambda: _render_mission_log(state))
+    lidar_view = ui.refreshable(
+        lambda: lidar_panel.lidar_panel(lidar_runtime.get_lidar_reader())
+    )
 
     with ui.column().classes("w-full max-w-6xl mx-auto gap-3 p-3"):
         panels.simulation_banner()
@@ -81,7 +85,7 @@ def main_page() -> None:
         # Competition/Development mode). Read-only content updates in place, so
         # the 2 Hz tick no longer destroys interactive widgets (F9).
         structure = ui.column().classes("w-full gap-3")
-        _render_structure(structure, state, monitor, mission_panel, mission_log)
+        _render_structure(structure, state, monitor, mission_panel, mission_log, lidar_view)
 
         # A single persistent, append-only event log shared by both modes.
         ui.label("Event log (simulated)").classes("text-sm text-gray-500 uppercase")
@@ -91,7 +95,9 @@ def main_page() -> None:
         # Per-page timer: refresh the view only. It never advances the runtime.
         timer = ui.timer(
             TICK_INTERVAL_S,
-            lambda: _on_tick(structure, log, state, monitor, mission_panel, mission_log),
+            lambda: _on_tick(
+                structure, log, state, monitor, mission_panel, mission_log, lidar_view
+            ),
             active=True,
         )
 
@@ -109,6 +115,7 @@ def _render_structure(
     monitor: ui.refreshable,
     mission_panel: ui.refreshable,
     mission_log: ui.refreshable,
+    lidar_view: ui.refreshable,
 ) -> None:
     """Build (or rebuild) the page layout. Called on page load and layout change."""
     structure.clear()
@@ -120,6 +127,7 @@ def _render_structure(
             else:
                 _render_development_side(state)
         mission_panel()
+        lidar_view()
         _render_vision_panel()
         mission_log()
 
@@ -131,6 +139,7 @@ def _on_tick(
     monitor: ui.refreshable,
     mission_panel: ui.refreshable,
     mission_log: ui.refreshable,
+    lidar_view: ui.refreshable,
 ) -> None:
     # REFRESH ONLY. The mission is advanced by the single server-side loop in
     # amr_dashboard.runtime; the page must never call runtime.step()/engine.tick()
@@ -140,12 +149,13 @@ def _on_tick(
     signature = layout_signature(state)
     if signature != state.layout_signature:
         state.layout_signature = signature
-        _render_structure(structure, state, monitor, mission_panel, mission_log)
+        _render_structure(structure, state, monitor, mission_panel, mission_log, lidar_view)
     else:
         # Update read-only regions in place instead of clearing the whole body.
         monitor.refresh()
         mission_panel.refresh()
         mission_log.refresh()
+        lidar_view.refresh()
 
     state.log_cursor = panels.append_events(log, state.engine, state.log_cursor)
 
@@ -523,9 +533,34 @@ def _stop_runtime_loop() -> None:
     stop_server_loop()
 
 
+def _start_lidar() -> None:
+    """Start the live LiDAR reader (idempotent; no-op if disabled/unavailable)."""
+    lidar_runtime.start_lidar()
+
+
+def _stop_lidar() -> None:
+    """Stop the live LiDAR reader and release the serial port on shutdown."""
+    lidar_runtime.stop_lidar()
+
+
 app.on_startup(_start_runtime_loop)
+app.on_startup(_start_lidar)
+app.on_shutdown(_stop_lidar)
 app.on_shutdown(_stop_runtime_loop)
 
 
-def run(host: str = "127.0.0.1", port: int = 8080, reload: bool = False) -> None:
+def run(
+    host: str = "127.0.0.1",
+    port: int = 8080,
+    reload: bool = False,
+    lidar_config: LidarConfig | None = None,
+) -> None:
+    """Launch the dashboard.
+
+    ``lidar_config`` (when given) sets the LiDAR port/baud before startup; the
+    reader itself is started/stopped by the app lifecycle hooks above. Importing
+    this module never opens a serial port.
+    """
+    if lidar_config is not None:
+        lidar_runtime.configure(lidar_config)
     ui.run(host=host, port=port, title="AMR LKS Dashboard", reload=reload, show=False)
