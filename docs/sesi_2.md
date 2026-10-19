@@ -25,11 +25,13 @@ Sesi ini menghasilkan empat hal:
 4. **Roda bergerak.** Perintah motor diterima dan roda berputar (singkat pada
    percobaan pertama, lalu berkelanjutan setelah perintah distreaming 50 Hz).
 5. **Pemetaan ID motor ke posisi roda DITEMUKAN** — 1=depan kiri, 2=belakang
-   kiri, 3=depan kanan, 4=belakang kanan, beserta konvensi tandanya (§9.5).
+   kiri, 3=depan kanan, 4=belakang kanan (§9.5).
+6. **Robot berjalan di lantai.** Diameter roda terukur 5,5 cm, konvensi tanda
+   arah terkoreksi, dan ambang stall ditemukan antara 0,15–0,3 rps (§9.7).
 
-Yang **belum** terjawab: nilai numerik radius roda, `L`, `H`, apakah satuan `rps`
-benar secara numerik, sumber nyendet saat berbeban, dan apakah odometri memakai
-encoder (tidak ada fungsi encoder yang terlihat saat mendengar).
+Yang **belum** terjawab: mengapa kecepatan efektif hanya **~19%** dari perintah,
+nilai `L` dan `H`, apakah satuan `rps` benar secara numerik, dan apakah odometri
+memakai encoder (tidak ada fungsi encoder yang terlihat saat mendengar).
 
 ---
 
@@ -284,11 +286,13 @@ Ketiganya informatif — tidak ada hasil yang benar-benar gagal.
 | --- | --- | --- |
 | Konfigurasi roller | **DITEMUKAN** — ABAB | Chassis PDF §3.1.1 |
 | Satuan kecepatan | **DITEMUKAN** — rps | Chassis PDF §3.1.1 |
-| Radius roda | Belum ditemukan | `mecanum.py` (belum diperoleh) |
-| Track width `L` | Belum ditemukan | idem |
+| Radius roda | **DITEMUKAN (kasar)** — 0,0275 m dari diameter 5,5 cm | ukur penggaris §9.7; perlu jangka sorong |
+| Track width `L` | Belum ditemukan | `mecanum.py` (belum diperoleh) |
 | Wheelbase `H` | Belum ditemukan | idem |
 | Pemetaan ID motor → posisi | **DITEMUKAN** — 1=FL, 2=RL, 3=FR, 4=RR | uji fisik §9.5 |
-| Konvensi tanda arah | **DITEMUKAN** — kiri `+`, kanan `−` = maju | uji fisik §9.5 |
+| Konvensi tanda arah | **DITEMUKAN** — maju = `1:-, 2:-, 3:+, 4:+` | uji translasi §9.7 |
+| Skala kecepatan efektif | **BELUM** — aktual hanya ~19% dari perintah | §9.7 |
+| Ambang kecepatan minimum | **SEBAGIAN** — antara 0,15 dan 0,3 rps | §9.7 |
 | Resolusi encoder | Belum ditemukan | tidak ada di protokol |
 | Rasio gearbox | Belum ditemukan | — |
 
@@ -362,11 +366,14 @@ menjelaskan mengapa upstream memakai node yang mempublikasikan terus-menerus.
 
 ### 9.4 Yang belum dipastikan dari uji ini
 
-- **Satuan `rps` belum diverifikasi secara numerik** — roda berputar, tetapi
-  apakah 0.3 benar-benar berarti 0.3 putaran/detik belum diukur.
+- **Mengapa kecepatan efektif hanya ~19% dari perintah** (§9.7) — pertanyaan
+  terbuka terbesar.
+- **Apakah satuan `rps` benar secara numerik** — belum tervalidasi.
 - **Kecepatan maksimum aman** belum diketahui.
-- **Sumber nyendet saat berbeban** belum dipastikan (§9.6).
-- Semua pengujian dilakukan dengan **roda terangkat**, sehingga tidak ada beban.
+- **Apakah nyendet hilang saat berbeban** — belum dinilai pada kecepatan tinggi;
+  percobaan 0,6 rps berjalan tetapi jaraknya belum diukur.
+- Uji translasi di tanah hanya sampai 0,6 rps; belum ada uji belok atau geser
+  samping (mecanum).
 
 ### 9.5 Pemetaan ID motor ke posisi roda — DITEMUKAN
 
@@ -387,16 +394,22 @@ pengamat mencatat roda mana yang bergerak.
 Ini konsisten dengan motor kanan yang terpasang **bercermin** — arah putar poros
 yang sama menghasilkan gerak linear berlawanan pada sisi berlawanan.
 
-**Konvensi tanda yang terverifikasi:**
+**Konvensi tanda — DIKOREKSI setelah uji di tanah (§9.7):**
 
 ```
-maju  = 1:+0.3, 2:+0.3, 3:-0.3, 4:-0.3     → keempat roda searah secara fisik
-putar = 1:+0.3, 2:+0.3, 3:+0.3, 4:+0.3     → berputar di tempat
+maju   = 1:-0.3, 2:-0.3, 3:+0.3, 4:+0.3
+mundur = 1:+0.3, 2:+0.3, 3:-0.3, 4:-0.3
+putar  = 1:+0.3, 2:+0.3, 3:+0.3, 4:+0.3
 ```
 
-Kedua pola sudah diuji di perangkat dan hasilnya sesuai. Ini adalah bekal langsung
-untuk inverse kinematics mecanum: nilai sisi kanan harus dinegasikan sebelum
-dikirim.
+> **Koreksi penting.** Versi pertama catatan ini menyatakan `maju = 1:+, 2:+, 3:-, 4:-`.
+> Itu **salah**, dan kesalahannya berasal dari metode: saat roda terangkat kita
+> hanya dapat mengamati **arah putar roda**, bukan **arah pindah robot**. Uji di
+> tanah (§9.7) membuktikan tanda itu justru membuat robot **mundur**. Konvensi
+> yang benar adalah kebalikannya.
+
+Pelajaran metodologis: **arah putar roda tidak menentukan arah gerak chassis.**
+Hanya uji translasi nyata yang dapat menetapkannya.
 
 ### 9.6 Nyendet (stutter) — belum tuntas
 
@@ -430,3 +443,92 @@ pengiriman perintah yang tidak teratur.
 **Prasyarat untuk menyelesaikannya:** uji ulang **di tanah** pada area aman,
 dengan kecepatan rendah, E-stop siap, dan pembatas jarak — karena hanya dengan
 beban nyata gejala ini bisa dinilai dengan benar.
+
+### 9.7 Uji translasi di tanah — 19 Oktober 2026
+
+Robot diletakkan di lantai, penggaris 15 cm di depan badan dengan angka 0 pada
+tepi depan chassis.
+
+**Diameter roda (ukur kasar dengan penggaris): 5,5 cm**
+
+| Besaran | Nilai |
+| --- | --- |
+| Diameter | 0,055 m |
+| Radius | 0,0275 m |
+| Keliling | 0,1728 m |
+
+Ketelitian: kasar. Selisih 1 mm pada diameter ≈ 1,8% pada keliling. Perlu diukur
+ulang dengan jangka sorong.
+
+**Urutan percobaan**
+
+| # | Perintah | Hasil pengamatan |
+| --- | --- | --- |
+| 1 | 0,15 rps, 1 s, tanda "maju" lama | **Bunyi, tidak bergerak** |
+| 2 | 0,3 rps, 1 s, tanda "maju" lama | **Bergerak, tetapi MUNDUR** |
+| 3 | 0,3 rps, 1 s, tanda dibalik | **Maju**, jarak pendek |
+| 4 | 0,3 rps, 5 s, tanda dibalik | **5 cm** terukur |
+| 5 | 0,6 rps, 3 s, tanda dibalik | Berjalan; **roda terlihat pelan**; jarak tidak sempat diukur (sesi berhenti) |
+
+**Perhitungan dari percobaan 4**
+
+```
+kecepatan aktual   = 5 cm / 5 s          = 1,00 cm/s
+kecepatan perintah = 0,3 rps × 17,28 cm  = 5,18 cm/s
+rasio              = 1,00 / 5,18         ≈ 19%
+prediksi bila rps benar                  = 26 cm
+```
+
+Robot hanya bergerak **~19% dari yang diperintahkan**.
+
+**Temuan: penyebabnya BUKAN selip.** Pengamat memastikan **rodanya sendiri yang
+berputar pelan**, bukan berputar kencang sementara chassis merayap. Ini menyingkirkan
+hipotesis traksi/selip dan mengarah ke motor yang tidak mencapai kecepatan perintah.
+
+**Ambang minimum operasional.** 0,15 rps berhenti total (stall), 0,3 rps berjalan.
+Ambangnya ada di antara keduanya, sekitar 0,2–0,3 rps. Kecepatan di bawah ambang
+ini hanya menghasilkan dengung tanpa gerak.
+
+**Status: BELUM SELESAI.** Rasio 19% belum dapat dijelaskan. Dua kandidat utama
+masih hidup dan belum dipisahkan:
+
+1. **Faktor skala satuan** — nilai float bukan rps, melainkan satuan lain dengan
+   skala ~1/5
+2. **Motor tidak mencapai kecepatan perintah** — kontrol kecepatan closed-loop
+   berosilasi atau duty cycle terlalu rendah, sehingga rata-rata kecepatan jauh
+   di bawah target
+
+Percobaan 5 (0,6 rps) dirancang untuk memisahkannya — bila rasio tetap ~19% berarti
+faktor skala; bila membaik berarti ambang stall — tetapi **jaraknya belum terukur**
+saat sesi berhenti. Ini pekerjaan pertama untuk sesi berikutnya.
+
+---
+
+## 10. Pekerjaan berikutnya (belum dikerjakan)
+
+Diurutkan berdasarkan nilai per usaha. Sesi berhenti sebelum sempat menyelesaikan
+poin 1.
+
+1. **Ukur jarak percobaan 0,6 rps / 3 detik** yang sudah dijalankan tetapi belum
+   diukur. Ini pekerjaan termurah dan langsung memisahkan dua kandidat penyebab
+   rasio 19% (§9.7): bila rasio tetap ~19% berarti faktor skala satuan; bila
+   membaik berarti ambang stall. Butuh penggaris lebih panjang atau ruang ~40 cm.
+
+2. **Ukur diameter roda dengan jangka sorong.** Pengukuran penggaris (5,5 cm)
+   memiliki galat ±1 mm ≈ ±1,8% pada keliling, dan roller mecanum membuat
+   keliling efektif tidak identik dengan keliling geometris.
+
+3. **Ukur `L` dan `H`** (jarak antar-pusat roda kiri–kanan dan depan–belakang)
+   dengan penggaris/meteran pada robot mati. Nol risiko, dan ini dua parameter
+   terakhir yang menghambat penulisan kinematika mecanum.
+
+4. **Uji belok di tempat** (`1:+, 2:+, 3:+, 4:+`) dan **geser samping** — dua
+   gerakan khas mecanum yang belum pernah diuji sama sekali. Diperlukan untuk
+   memvalidasi model kinematika begitu `L`/`H` terisi.
+
+5. **Selesaikan pertanyaan encoder.** Pengamatan 8 detik (§9.1) hanya melihat SYS
+   dan IMU. Perlu pengamatan lebih lama, atau `driver.zip` dari Drive yang belum
+   diunduh, untuk memastikan ada/tidaknya kanal umpan balik roda.
+
+**Prasyarat tetap sama untuk semua uji gerak:** area kosong, E-stop dalam
+jangkauan, kecepatan rendah, dan durasi pendek.
