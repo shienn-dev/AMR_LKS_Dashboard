@@ -23,11 +23,13 @@ Sesi ini menghasilkan empat hal:
 3. **Protokol STM32 TERKONFIRMASI di board fisik** — bukan lagi SOURCE-ONLY.
    289 frame valid, **0 CRC error**, 0 resync dalam 8 detik mendengar.
 4. **Roda bergerak.** Perintah motor diterima dan roda berputar (singkat pada
-   percobaan pertama, lalu berkelanjutan setelah perintah distreaming 20 Hz).
+   percobaan pertama, lalu berkelanjutan setelah perintah distreaming 50 Hz).
+5. **Pemetaan ID motor ke posisi roda DITEMUKAN** — 1=depan kiri, 2=belakang
+   kiri, 3=depan kanan, 4=belakang kanan, beserta konvensi tandanya (§9.5).
 
-Yang **belum** terjawab: nilai numerik radius roda, `L`, `H`, pemetaan ID motor ke
-posisi fisik, dan apakah odometri memakai encoder (tidak ada fungsi encoder yang
-terlihat saat mendengar).
+Yang **belum** terjawab: nilai numerik radius roda, `L`, `H`, apakah satuan `rps`
+benar secara numerik, sumber nyendet saat berbeban, dan apakah odometri memakai
+encoder (tidak ada fungsi encoder yang terlihat saat mendengar).
 
 ---
 
@@ -195,7 +197,8 @@ dan pemilik memberi izin.
 | --- | --- |
 | Dry run default | Tanpa `--confirm`, skrip hanya mencetak frame yang *akan* dikirim; port tidak dibuka |
 | Konfirmasi interaktif | Dengan `--confirm`, harus mengetik `MOVE` (lewati dengan `--yes`) |
-| Streaming berjeda | Perintah dikirim berulang pada `--rate` (default 20 Hz) selama `--duration`, karena board berhenti sendiri bila perintah berhenti mengalir |
+| Streaming berjeda | Perintah dikirim berulang pada `--rate` (default 50 Hz) selama `--duration`, karena board berhenti sendiri bila perintah berhenti mengalir. Penjadwalan absolut (`next_send += period`) supaya latensi tulis tidak menumpuk jadi drift |
+| Kecepatan per-motor | `--speeds "1:0.3,2:0.3,3:-0.3,4:-0.3"` untuk pola kiri/kanan berbeda; menimpa `--motors`/`--speed` |
 | Stop di `finally` | Frame stop tetap dikirim walau error atau Ctrl+C |
 | Kecepatan rendah | Default `0.15` rps (~9 rpm), jauh di bawah demo pabrik `0.6` |
 | DTR/RTS pra-open | `dtr=False`, `rts=False` **sebelum** `open()` — terbukti tidak me-reset board (§9.1) |
@@ -284,7 +287,8 @@ Ketiganya informatif — tidak ada hasil yang benar-benar gagal.
 | Radius roda | Belum ditemukan | `mecanum.py` (belum diperoleh) |
 | Track width `L` | Belum ditemukan | idem |
 | Wheelbase `H` | Belum ditemukan | idem |
-| Pemetaan ID motor → posisi | Belum ditemukan | perlu uji fisik |
+| Pemetaan ID motor → posisi | **DITEMUKAN** — 1=FL, 2=RL, 3=FR, 4=RR | uji fisik §9.5 |
+| Konvensi tanda arah | **DITEMUKAN** — kiri `+`, kanan `−` = maju | uji fisik §9.5 |
 | Resolusi encoder | Belum ditemukan | tidak ada di protokol |
 | Rasio gearbox | Belum ditemukan | — |
 
@@ -358,9 +362,71 @@ menjelaskan mengapa upstream memakai node yang mempublikasikan terus-menerus.
 
 ### 9.4 Yang belum dipastikan dari uji ini
 
-- **Pemetaan ID motor → posisi fisik** (FL/FR/RL/RR) belum ditentukan; percobaan
-  memakai keempat ID sekaligus.
-- **Arah putaran** tiap roda belum dicatat per-ID.
 - **Satuan `rps` belum diverifikasi secara numerik** — roda berputar, tetapi
   apakah 0.3 benar-benar berarti 0.3 putaran/detik belum diukur.
 - **Kecepatan maksimum aman** belum diketahui.
+- **Sumber nyendet saat berbeban** belum dipastikan (§9.6).
+- Semua pengujian dilakukan dengan **roda terangkat**, sehingga tidak ada beban.
+
+### 9.5 Pemetaan ID motor ke posisi roda — DITEMUKAN
+
+Metode: tiap motor dijalankan sendiri-sendiri, 0.3 rps, 2 detik, roda terangkat,
+pengamat mencatat roda mana yang bergerak.
+
+| ID | Posisi | `+` berarti |
+| --- | --- | --- |
+| 1 | depan kiri (FL) | maju |
+| 2 | belakang kiri (RL) | maju |
+| 3 | depan kanan (FR) | **mundur** |
+| 4 | belakang kanan (RR) | **mundur** |
+
+**Urutannya kiri dulu lalu kanan**, bukan berkeliling (bukan FL→FR→RL→RR).
+
+**Pengamatan pendukung.** Memberi `+0.3` yang sama ke keempat motor menghasilkan
+**putaran di tempat**, bukan maju: dua roda kiri maju, dua roda kanan mundur.
+Ini konsisten dengan motor kanan yang terpasang **bercermin** — arah putar poros
+yang sama menghasilkan gerak linear berlawanan pada sisi berlawanan.
+
+**Konvensi tanda yang terverifikasi:**
+
+```
+maju  = 1:+0.3, 2:+0.3, 3:-0.3, 4:-0.3     → keempat roda searah secara fisik
+putar = 1:+0.3, 2:+0.3, 3:+0.3, 4:+0.3     → berputar di tempat
+```
+
+Kedua pola sudah diuji di perangkat dan hasilnya sesuai. Ini adalah bekal langsung
+untuk inverse kinematics mecanum: nilai sisi kanan harus dinegasikan sebelum
+dikirim.
+
+### 9.6 Nyendet (stutter) — belum tuntas
+
+Gejala: saat roda berputar, gerakannya tersendat ("nyendet-nyendet"), bukan halus.
+
+Urutan investigasi:
+
+| Percobaan | Perubahan | Hasil |
+| --- | --- | --- |
+| 1 | 20 Hz, `flush()` tiap frame, `sleep(period)` | Nyendet |
+| 2 | 50 Hz, penjadwalan absolut, `flush()` sekali di akhir | **Masih nyendet** |
+| 3 | 0.8 rps (48 rpm), 50 Hz | **Berkurang**, tetapi belum dapat dipastikan hilang |
+
+**Mengapa belum dapat disimpulkan:** pengujian dilakukan dengan **roda terangkat**.
+Roda tanpa beban berperilaku berbeda dari roda di tanah — tanpa beban, motor tidak
+melawan gesekan dan inersia chassis. Jadi "berkurang saat 0.8 rps" **bukan** bukti
+bahwa masalahnya torsi atau kontrol rpm rendah; bisa jadi justru sebaliknya, di
+tanah nyendetnya muncul di rentang kecepatan lain.
+
+**Yang sudah dapat disingkirkan:** timing pengiriman perintah. Pada 50 Hz, 150
+frame terkirim dalam 3,0 detik — tepat 50 Hz tanpa drift. Jadi masalahnya bukan
+pengiriman perintah yang tidak teratur.
+
+**Kandidat penyebab yang masih terbuka:**
+
+1. Kontrol kecepatan closed-loop di board berosilasi pada rpm rendah
+2. Batas arus/torsi motor tersentuh
+3. Faktor mekanis: roda, roller, atau gearbox
+4. Karakteristik normal firmware pada beban nol
+
+**Prasyarat untuk menyelesaikannya:** uji ulang **di tanah** pada area aman,
+dengan kecepatan rendah, E-stop siap, dan pembatas jarak — karena hanya dengan
+beban nyata gejala ini bisa dinilai dengan benar.
