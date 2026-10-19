@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Supervised, single-shot wheel test for the STM32 chassis controller.
+"""Supervised wheel test for the STM32 chassis controller.
 
 SAFETY MODEL
 ------------
@@ -11,9 +11,11 @@ fire by accident:
   *would* send and exits without opening the port.
 * **Interactive acknowledgement.** Even with ``--confirm`` you must type the
   word ``MOVE`` at the prompt (skip with ``--yes`` only for scripted runs).
-* **One command, then stop.** A single motor frame is sent, held for
-  ``--duration`` seconds, then an explicit all-zero stop frame is sent. The stop
-  also runs in a ``finally`` block, so it is sent even on error or Ctrl+C.
+* **One command stream, then stop.** The move frame is re-sent at ``--rate``
+  (default 20 Hz) for ``--duration`` seconds, then an explicit all-zero stop frame
+  is sent. Streaming is required: the board stops the motors if commands stop
+  arriving (observed on hardware — a single frame produced only a brief twitch).
+  The stop also runs in a ``finally`` block, so it is sent even on error or Ctrl+C.
 * **Low speed by default.** ``--speed 0.15`` rps is roughly 9 rpm. The factory
   demo uses 0.6; we start far below that because this board's firmware is
   unverified.
@@ -29,9 +31,11 @@ PRECONDITIONS (do not skip)
    ModemManager is active on this image, so it may open/reset the port on its
    own. See the warning printed by this script.
 
-PROTOCOL (from the stock Hiwonder SDK, unverified on this board)
-----------------------------------------------------------------
-Frame: ``0xAA 0x55 <func> <len> <payload> <crc8>``, CRC-8 reflected poly 0x8C.
+PROTOCOL (from the stock Hiwonder SDK, confirmed on this board 2026-10-19)
+-----------------------------------------------------------------------
+Listening on ``/dev/ttyACM0`` for 8 s produced 289 valid frames with zero CRC
+errors (IMU ~35 Hz, SYS ~0.9 Hz), so this board does speak the protocol below.
+Motor commands were also accepted and turned the wheels.
 Motor (func 3): ``[0x01, n, (motor_id - 1 : u8, speed : float32 LE) x n]``.
 Speed unit is **rps** (rev/s) per Hiwonder "3. Chassis Motion Control" §3.1.1
 (``speed_covert`` converts m/s -> rps).
@@ -63,6 +67,9 @@ from amr_core.robot.stm32_protocol import Stm32Function, build_frame  # noqa: E4
 DEFAULT_PORT = "/dev/ttyACM0"
 DEFAULT_SPEED_RPS = 0.15
 DEFAULT_DURATION_S = 1.0
+# The board stops the motors shortly after commands stop arriving, so the frame
+# must be streamed. 20 Hz is the rate the upstream stack effectively uses.
+DEFAULT_RATE_HZ = 20.0
 # The stock SDK opens at 1 Mbaud even though this is a CDC-ACM device where the
 # line rate is nominal. Kept identical to the SDK to avoid a second variable.
 DEFAULT_BAUD = 1_000_000
@@ -153,10 +160,17 @@ def run(args: argparse.Namespace) -> int:
         print(f"  opened {args.port} @ {args.baud}")
         time.sleep(args.settle)  # let the board settle after open
 
-        port.write(frame)
-        port.flush()
-        print(f"  sent move frame ({len(frame)} bytes), holding {args.duration}s")
-        time.sleep(args.duration)
+        # The board appears to run a watchdog: a single frame produced only a
+        # brief twitch, so commands are streamed at --rate instead of sent once.
+        period = 1.0 / args.rate
+        deadline = time.monotonic() + args.duration
+        sent = 0
+        while time.monotonic() < deadline:
+            port.write(frame)
+            port.flush()
+            sent += 1
+            time.sleep(period)
+        print(f"  sent {sent} move frames at ~{args.rate:.0f} Hz over {args.duration}s")
 
     except Exception as exc:  # noqa: BLE001 - report the real cause, never hide it
         print(f"  ERROR while transmitting: {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -200,6 +214,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=float,
         default=DEFAULT_DURATION_S,
         help=f"how long to hold the command, seconds (default {DEFAULT_DURATION_S})",
+    )
+    parser.add_argument(
+        "--rate",
+        type=float,
+        default=DEFAULT_RATE_HZ,
+        help=(
+            "command stream rate in Hz (default "
+            f"{DEFAULT_RATE_HZ}); the board stops motors if it stops receiving"
+        ),
     )
     parser.add_argument(
         "--motors",

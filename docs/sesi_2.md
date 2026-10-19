@@ -15,15 +15,19 @@ Drive Hiwonder, temuan teknis yang mengubah asumsi, dan persiapan uji aktuasi ro
 
 ## 1. Ringkasan
 
-Sesi ini menghasilkan tiga hal:
+Sesi ini menghasilkan empat hal:
 
 1. **Dokumentasi pabrik berhasil diakses** dan 5 PDF tersimpan di `~/dokumentasi_lander/`.
 2. **Dua pertanyaan lama terjawab**: konfigurasi roller Mecanum (ABAB) dan satuan
    kecepatan motor (**rps**).
-3. **Alat uji roda siap** (`scripts/wheel_test.py`) tetapi **belum dijalankan**.
+3. **Protokol STM32 TERKONFIRMASI di board fisik** — bukan lagi SOURCE-ONLY.
+   289 frame valid, **0 CRC error**, 0 resync dalam 8 detik mendengar.
+4. **Roda bergerak.** Perintah motor diterima dan roda berputar (singkat pada
+   percobaan pertama, lalu berkelanjutan setelah perintah distreaming 20 Hz).
 
-Yang **belum** terjawab: nilai numerik radius roda, `L`, `H`, dan apakah odometri
-benar-benar memakai encoder.
+Yang **belum** terjawab: nilai numerik radius roda, `L`, `H`, pemetaan ID motor ke
+posisi fisik, dan apakah odometri memakai encoder (tidak ada fungsi encoder yang
+terlihat saat mendengar).
 
 ---
 
@@ -182,7 +186,8 @@ bisa diambil dari sana.**
 
 ## 4. Alat baru: `scripts/wheel_test.py`
 
-Skrip uji aktuasi sekali-jalan. **Tidak dijalankan selama sesi ini.**
+Skrip uji aktuasi. **Dijalankan pada sesi ini** (lihat §9) setelah roda terangkat
+dan pemilik memberi izin.
 
 ### Pengaman berlapis
 
@@ -190,10 +195,10 @@ Skrip uji aktuasi sekali-jalan. **Tidak dijalankan selama sesi ini.**
 | --- | --- |
 | Dry run default | Tanpa `--confirm`, skrip hanya mencetak frame yang *akan* dikirim; port tidak dibuka |
 | Konfirmasi interaktif | Dengan `--confirm`, harus mengetik `MOVE` (lewati dengan `--yes`) |
-| Satu perintah lalu stop | Satu frame gerak, tahan `--duration`, lalu frame stop eksplisit |
+| Streaming berjeda | Perintah dikirim berulang pada `--rate` (default 20 Hz) selama `--duration`, karena board berhenti sendiri bila perintah berhenti mengalir |
 | Stop di `finally` | Frame stop tetap dikirim walau error atau Ctrl+C |
 | Kecepatan rendah | Default `0.15` rps (~9 rpm), jauh di bawah demo pabrik `0.6` |
-| DTR/RTS pra-open | `dtr=False`, `rts=False` **sebelum** `open()` — mengurangi, bukan menjamin, reset MCU |
+| DTR/RTS pra-open | `dtr=False`, `rts=False` **sebelum** `open()` — terbukti tidak me-reset board (§9.1) |
 | Peringatan ModemManager | Mencetak peringatan `ID_MM_CANDIDATE=1` setiap kali akan transmisi |
 
 ### Verifikasi frame
@@ -218,7 +223,7 @@ IDENTIK: True | 27 byte | CRC valid: True
 
 ## 5. Rencana uji roda
 
-**Perkiraan total: 60–90 menit.** Belum dijalankan.
+**Perkiraan total: 60–90 menit.** **Sudah dijalankan** — hasil di §9.
 
 ### Prasyarat — wajib, jangan dilewati
 
@@ -256,9 +261,10 @@ Ketiganya informatif — tidak ada hasil yang benar-benar gagal.
 
 1. **ModemManager.** `/dev/ttyACM0` ber-flag `ID_MM_CANDIDATE=1` dan ModemManager
    aktif, tanpa rule `ID_MM_PORT_IGNORE`. Artinya port dapat dibuka/direset oleh
-   sistem **tanpa kita melakukan apa pun**. Menonaktifkannya adalah perubahan
-   konfigurasi dan butuh persetujuan. Alternatif: terima risiko, baca hasil dengan
-   hati-hati.
+   sistem **tanpa kita melakukan apa pun**.
+   **Keputusan sesi ini:** risiko diterima, ModemManager tidak dinonaktifkan.
+   Tidak ada reset yang teramati selama uji (§9.1). Perlu ditinjau ulang sebelum
+   uji yang lebih lama atau saat robot di lapangan.
 
 2. **`driver.zip` + `landerpi_description.zip`.** Mengisi 4 dari 5 parameter yang
    masih kosong (§3.3) dan menyelesaikan perdebatan odometri (§3.5). Keduanya ZIP,
@@ -288,6 +294,73 @@ Ketiganya informatif — tidak ada hasil yang benar-benar gagal.
 
 - Tidak ada paket dipasang, tidak ada unduhan selain PDF
 - Tidak ada konfigurasi sistem/RasPi diubah
-- `/dev/ttyACM0` tidak dibuka; tidak ada perintah motor dikirim
 - Tidak ada service dihentikan
+- ModemManager **tidak** dinonaktifkan (masih aktif, risiko diterima)
 - File sementara di `/tmp` sudah dibersihkan
+
+Satu-satunya perubahan yang disengaja: **`scripts/wheel_test.py` ditambahkan dan
+dijalankan** untuk menggerakkan roda, dengan roda terangkat dan izin pemilik
+(lihat §9).
+
+---
+
+## 9. Hasil uji aktuasi — 19 Oktober 2026
+
+Roda terangkat, izin pemilik diberikan, ModemManager dibiarkan aktif (risiko
+diterima dan dicatat).
+
+### 9.1 Protokol TERKONFIRMASI di board fisik
+
+Diagnostik paling menentukan adalah **mendengar** port tanpa mengirim apa pun:
+buka port dengan `dtr=False, rts=False`, baca 8 detik, alirkan byte ke
+`FrameDecoder` yang sudah ada.
+
+```
+port dibuka (read-only, tidak menulis apa pun)
+durasi 8s | byte diterima: 8234
+frame valid: 289 | CRC error: 0 | resync: 0
+payload terdekode: 289
+fungsi terlihat: {'SYS': 7, 'IMU': 282}
+```
+
+**289 frame valid dengan nol CRC error tidak mungkin kebetulan.** Kesimpulan:
+
+| Klaim lama | Status sekarang |
+| --- | --- |
+| "Protokol belum terverifikasi di board sekolah" | **TERVERIFIKASI** |
+| Format IMU `<6f` (24 byte) | **TERVERIFIKASI** — 282 payload terdekode |
+| Board mengirim spontan (bukan polling) | **TERVERIFIKASI** — ~35 Hz IMU, ~0.9 Hz SYS |
+| `dtr/rts=False` mencegah reset | **TERBUKTI** — `devnum` tetap 2, tidak ada enumerasi ulang |
+
+### 9.2 Fungsi yang terlihat
+
+Hanya **SYS (0)** dan **IMU (7)** yang dikirim board secara spontan. **Tidak ada
+fungsi encoder** dalam 8 detik pengamatan. Ini konsisten dengan temuan §3.5: tidak
+ada kanal encoder yang diketahui, meski pengamatan 8 detik belum cukup untuk
+menyimpulkan ketiadaan secara mutlak.
+
+### 9.3 Roda bergerak
+
+| Percobaan | Perintah | Hasil |
+| --- | --- | --- |
+| 1 | motor 1, 0.1 rps, 0.8 s, **satu frame** | Tidak berputar; roda bertenaga (menolak digerakkan, bergetar) |
+| 2 | 4 motor, 0.5 rps, 2 s, **satu frame** | **Bergerak, tetapi sangat singkat** |
+| 3 | 4 motor, 0.3 rps, 3 s, **59 frame @ 20 Hz** | Perintah terkirim penuh; stop terkirim; port ditutup |
+
+**Temuan penting — board punya watchdog.** Satu frame hanya menghasilkan gerakan
+sekilas; setelah itu motor berhenti meski durasi belum habis. Artinya firmware
+**mematikan motor bila perintah berhenti mengalir**. Karena itu skrip diubah untuk
+menstreaming frame pada `--rate` (default 20 Hz).
+
+Konsekuensi untuk desain berikutnya: transport chassis nyata **wajib** mengirim
+perintah secara periodik, bukan sekali per perubahan kecepatan. Ini juga
+menjelaskan mengapa upstream memakai node yang mempublikasikan terus-menerus.
+
+### 9.4 Yang belum dipastikan dari uji ini
+
+- **Pemetaan ID motor → posisi fisik** (FL/FR/RL/RR) belum ditentukan; percobaan
+  memakai keempat ID sekaligus.
+- **Arah putaran** tiap roda belum dicatat per-ID.
+- **Satuan `rps` belum diverifikasi secara numerik** — roda berputar, tetapi
+  apakah 0.3 benar-benar berarti 0.3 putaran/detik belum diukur.
+- **Kecepatan maksimum aman** belum diketahui.
