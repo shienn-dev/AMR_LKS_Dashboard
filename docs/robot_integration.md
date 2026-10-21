@@ -46,7 +46,7 @@ kode/dokumentasi, belum diverifikasi berjalan), **BELUM DIKETAHUI**,
 | LiDAR | STL-19P/LD19 @ `/dev/ttyUSB0` | paket 47 byte `0x54 0x2C`, 230400 baud | **TERVERIFIKASI** | `amr_core.lidar` + `lidar_panel` (sudah ada) | — | jangan sampai port/baud/panel rusak |
 | Kamera | Deptrum Aurora 930 `3251:1930` | vendor-specific, tanpa driver | **TERVERIFIKASI tidak tersedia** | `amr_core.robot.camera.probe_camera` (status saja) | pasang SDK Deptrum + dependency, lalu tulis source frame | instalasi dependency besar → butuh persetujuan |
 | Odometri | tidak ada sumber aktif | — | **BELUM DIKETAHUI** | `amr_core.robot.odometry.NoOdometrySource` (UNAVAILABLE) | verifikasi jalur encoder/IMU STM32, lalu implementasi source | butuh protokol terverifikasi |
-| Chassis | STM32 @ `/dev/ttyACM0` | serial `0xAA 0x55 ...` (`ros_robot_controller_sdk`) | **SOURCE-ONLY** | `amr_core.robot.chassis` (offline, tidak mengirim) | verifikasi protokol di board sekolah + uji fisik | actuation → **BLOCKED** |
+| Chassis | STM32 @ `/dev/ttyACM0` | serial `0xAA 0x55 ...` (`ros_robot_controller_sdk`) | **TERVERIFIKASI** (protokol + konvensi tanda) | `amr_core.robot.serial_chassis` (live, opt-in) + `amr_dashboard.chassis_panel` | verifikasi tanda lateral/putar di lantai (gate G1) | aktuasi nyata → **hanya dengan `--chassis-live`** |
 | Arm | bus servo di STM32 | `ros_robot_controller/bus_servo/set_position` (pulse 0..1000) | **SOURCE-ONLY** | `amr_core.robot.arm` (offline, tidak mengirim) | verifikasi jumlah joint, rentang aman, protokol | actuation → **BLOCKED** |
 | ROS 2 | tidak ada | — | **TERVERIFIKASI absen** | — | jangan pasang tanpa persetujuan | perubahan besar → butuh persetujuan |
 
@@ -66,8 +66,15 @@ Implementasi yang dikirim pada fase ini:
 
 - `OfflineChassisAdapter` / `OfflineArmAdapter`: memvalidasi + meng-clamp +
   mencatat perintah, tetapi **tidak mengirim apa pun** (`transmitted=False`).
-- `SerialChassisAdapter` / `SerialArmAdapter`: placeholder yang **menolak**
-  mengirim sampai protokol terverifikasi.
+- `SerialChassisAdapter` (`amr_core.robot.serial_chassis`): transport serial
+  yang **benar-benar mengirim** — thread pemilik port, stream 50 Hz (board
+  mematikan motor kalau frame berhenti mengalir), frame stop di `finally`, dan
+  state koneksi yang jujur. **Tidak** diaktifkan secara default: dashboard
+  memilihnya hanya bila dijalankan dengan `--chassis-live`.
+- `MotionGuard` (`amr_core.robot.motion_guard`): lapis fail-safe untuk
+  kontrol tahan-tekan — heartbeat klien, lease kendali, latch E-stop software.
+- `amr_core.robot.kinematics`: kinematika invers mecanum (vx, vy, wz) → 4
+  perintah roda, dengan pola maju yang terverifikasi di lantai.
 - `NoOdometrySource`: selalu `UNAVAILABLE`, tidak pernah mengarang pose.
 - `probe_camera`: melaporkan penyebab spesifik (mis. "Aurora 930 terdeteksi,
   tetapi tanpa driver/SDK").
@@ -107,9 +114,11 @@ Mengganti adapter offline dengan transport terverifikasi = perubahan kecil di
    tidak ada frame. (Terpasang: tidak. Izin: belum.)
 2. **Odometri** — tidak ada node `/odom` (tanpa ROS 2) dan jalur encoder/IMU
    STM32 belum diverifikasi.
-3. **Gerak chassis & arm** — jalur kontrol nyata belum terverifikasi di board
-   sekolah; mengirim perintah = actuation → **BLOCKED**.
-4. **E-stop fisik** — tombol E-stop hardware tidak diuji (dan tidak boleh diuji
+3. **Gerak chassis** — transport serialnya sudah ada dan aktif hanya dengan
+   `--chassis-live`, tetapi **pola tanda untuk lateral dan putar belum pernah
+   diverifikasi di lantai** (hanya pola maju yang terverifikasi translasi).
+   Gerbang G1 di `docs/rencana_chassis_live.md` harus dilewati lebih dulu.
+4. **E-stop fisik** — tombol E-stop hardware belum diuji (dan tidak boleh diuji
    dengan menggerakkan robot lebih dulu).
 
 ---
@@ -129,9 +138,21 @@ AMR_LIDAR_PORT=/dev/ttyUSB1 AMR_LIDAR_BAUD=230400 python run_dashboard.py
 Akses dari laptop (jaringan lokal): buka `http://<ip-pi>:8080`. IP Pi saat audit:
 `10.122.66.226`. **Jangan** mengekspos ke internet.
 
-Panel robot (camera/odometry/chassis/arm) selalu **offline** pada fase ini;
+Panel robot (camera/odometry/arm) memakai adapter **offline** pada fase ini;
 tidak ada environment variable yang mengaktifkan pengiriman perintah ke
 hardware. Perintah yang di-klik hanya divalidasi dan dicatat.
+
+Chassis punya satu pengecualian, dan hanya satu: `--chassis-live`.
+
+```
+python run_dashboard.py --chassis-live --chassis-port /dev/ttyACM0
+```
+
+Tanpa `--chassis-live`, dashboard tetap offline: chassis divalidasi dan
+di-clamp, tidak ada byte yang dikirim, dan robot tidak bisa bergerak. Dengan
+flag itu, port STM32 dibuka saat start-up, panel kontrol berubah menjadi
+tahan-tekan (maju/mundur/samping/putar + STOP), dan fail-safe aktif: heartbeat
+klien, lease kendali, latch E-stop software, dan watchdog board.
 
 Tes & lint:
 

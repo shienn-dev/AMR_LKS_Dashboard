@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import random
 
-from nicegui import app, ui
+from nicegui import app, context, ui
 
 from amr_core.lidar.config import LidarConfig
 from amr_core.mission import MissionConfig, validate_mission
@@ -29,7 +29,14 @@ from amr_core.mission_runner import mission_status
 from amr_core.samples import SAMPLE_MISSIONS, get_sample_mission
 from amr_core.states import RobotState
 from amr_core.vision import sample_detections
-from amr_dashboard import lidar_panel, lidar_runtime, panels, robot_panel, robot_runtime
+from amr_dashboard import (
+    chassis_panel,
+    lidar_panel,
+    lidar_runtime,
+    panels,
+    robot_panel,
+    robot_runtime,
+)
 from amr_dashboard.runtime import get_runtime, start_server_loop, stop_server_loop
 
 TICK_INTERVAL_S = 0.5  # per-page display refresh interval (seconds)
@@ -92,7 +99,6 @@ def main_page() -> None:
         _render_structure(
             structure, state, monitor, mission_panel, mission_log, lidar_view, robot_view
         )
-
         # A single persistent, append-only event log shared by both modes.
         ui.label("Event log (simulated)").classes("text-sm text-gray-500 uppercase")
         log = panels.event_log(max_lines=300)
@@ -125,6 +131,9 @@ def _render_structure(
     robot_view: ui.refreshable,
 ) -> None:
     """Build (or rebuild) the page layout. Called on page load and layout change."""
+    # A rebuild destroys the hold buttons. If the robot was moving, the "release"
+    # event would have nowhere to go, so the motion is stopped first.
+    _release_current_session_motion()
     structure.clear()
     with structure:
         with ui.row().classes("w-full gap-4 items-stretch"):
@@ -136,8 +145,19 @@ def _render_structure(
         mission_panel()
         lidar_view()
         robot_view()
+        # The chassis controls are interactive (hold-to-move), so they are built
+        # once and never refreshed: a button that is re-rendered while the
+        # pointer is down would swallow the release event.
+        chassis_panel.chassis_control_panel(robot_runtime.get_adapters())
         _render_vision_panel()
         mission_log()
+
+
+def _release_current_session_motion() -> None:
+    """Stop this browser's motion. Used before the page structure is rebuilt."""
+    guard = robot_runtime.get_adapters().guard
+    if guard is not None:
+        guard.release_motion(context.client.id)
 
 
 def _on_tick(
@@ -551,10 +571,32 @@ def _stop_lidar() -> None:
     lidar_runtime.stop_lidar()
 
 
+def _on_client_disconnect(client=None) -> None:
+    """Stop the robot when a browser goes away.
+
+    The client heartbeat would also expire a moment later, but a browser that
+    closes cleanly should not leave the robot rolling in the meantime.
+    """
+    guard = robot_runtime.get_adapters().guard
+    if guard is None:
+        return
+    session_id = getattr(client, "id", None) if client is not None else None
+    if session_id is None:
+        return
+    guard.release_motion(session_id)
+
+
+def _stop_chassis() -> None:
+    """Close the chassis port on shutdown (sends a final stop frame)."""
+    robot_runtime.close_adapters()
+
+
 app.on_startup(_start_runtime_loop)
 app.on_startup(_start_lidar)
 app.on_shutdown(_stop_lidar)
+app.on_shutdown(_stop_chassis)
 app.on_shutdown(_stop_runtime_loop)
+app.on_disconnect(_on_client_disconnect)
 
 
 def run(
@@ -562,13 +604,28 @@ def run(
     port: int = 8080,
     reload: bool = False,
     lidar_config: LidarConfig | None = None,
+    chassis_port: str | None = None,
+    chassis_live: bool = False,
 ) -> None:
     """Launch the dashboard.
 
     ``lidar_config`` (when given) sets the LiDAR port/baud before startup; the
     reader itself is started/stopped by the app lifecycle hooks above. Importing
     this module never opens a serial port.
+
+    ``chassis_live`` is the only switch that lets the dashboard drive the real
+    robot. It is off by default, and it prints a loud warning because a
+    mistake here moves a real machine.
     """
     if lidar_config is not None:
         lidar_runtime.configure(lidar_config)
+    if chassis_live:
+        robot_runtime.configure(live=True, port=chassis_port or "")
+        state = robot_runtime.open_live_chassis()
+        print("=" * 72)
+        print("  AKTUASI NYATA - the dashboard will drive the real robot.")
+        print(f"  chassis port: {chassis_port}  state: {state.value}")
+        print("  Keep the physical E-stop within reach. The robot moves while a")
+        print("  direction button is held, and stops when it is released.")
+        print("=" * 72)
     ui.run(host=host, port=port, title="AMR LKS Dashboard", reload=reload, show=False)

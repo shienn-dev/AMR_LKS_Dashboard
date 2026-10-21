@@ -41,6 +41,44 @@ Geometry
 are measured on this robot: 145 mm and 135 mm (sesi 3 §10). ``C_eff`` (distance
 travelled per wheel revolution) is 20,72 +/- 1,84 cm (sesi 3 §6).
 
+The model
+---------
+For a mecanum wheel whose rollers sit at 45 deg, the wheel can only roll along
+its roller direction, so the wheel's own rolling speed is the projection of the
+chassis velocity onto that direction:
+
+.. code-block:: text
+
+    rolling_i = v_x*cos(t_i) + v_y*sin(t_i) - w_z*(x_i*sin(t_i) + y_i*cos(t_i))
+
+The projection factor ``cos(45 deg)`` is then divided out, because the
+measured ``C_eff`` is a *forward* distance per revolution: with the projection
+kept in, a forward command would come out 1/sqrt(2) = 0,71 times too slow and
+would contradict the measured anchor below. The result is the usual mecanum
+matrix in the (forward, left, counter-clockwise) frame:
+
+.. code-block:: text
+
+    speed_FL = v_x + v_y - w_z*(a + b)
+    speed_RL = -v_x + v_y + w_z*(a + b)
+    speed_FR = -v_x + v_y - w_z*(a + b)
+    speed_RR = v_x + v_y + w_z*(a + b)
+
+    a = L/2 (half track width)      b = H/2 (half wheelbase)
+
+and the motor command is that speed times the wheel's command sign, divided by
+``C_eff``.
+
+Two independent hardware facts come out of this and both are already known:
+
+* **forward** gives ``1:- 2:- 3:+ 4:+`` -- the pattern verified on the floor.
+* **turning in place** gives the *same* sign on all four motors -- exactly what
+  was observed when a uniform ``+0.3`` to all four was run (sesi 2 §9.5,
+  "left forward, right backward", i.e. a spin rather than a drive).
+
+The **lateral** pattern is derived, not measured, and is the one to confirm at
+the hardware gate.
+
 Scale
 -----
 The board takes **rps** (revolutions per second). To make the dashboard slider
@@ -48,7 +86,7 @@ mean "metres per second on the floor", the commanded rate is
 
 .. code-block:: text
 
-    u = v / (EFFICIENCY * C_EFF)
+    u = v / (EFFICIENCY * C_Eff)
 
 with ``EFFICIENCY`` = 0,885, the ground efficiency measured in sesi 3 §7. That
 figure is **not** final (the ratio-vs-offset question is still open, and
@@ -84,6 +122,23 @@ EFFICIENCY = 0.885
 
 # Motors stall below ~0,2-0,3 rps and drive at 0,3 rps (sesi 2 §9.7).
 STALL_THRESHOLD_RPS = 0.3
+
+# Roller projection factor for the standard 45 deg roller: the wheel's own
+# rolling speed is cos(45 deg) times the chassis velocity component. It is
+# divided out so that the forward case matches the measured rps <-> m/s
+# relation (see the module docstring).
+PROJECTION_FACTOR = math.cos(math.radians(45.0))
+
+# The highest motor rate ever commanded on this robot: u = 1,0 rps, which
+# measured 0,19 m/s on the floor (sesi 3 section 7). The dashboard never
+# commands more than this, whatever the body command asks for.
+#
+# The cap matters because the *component* limits in safety.py do not bound the
+# combined motion: a diagonal command (vx = vy = 0,19) needs 2,07 rps on two
+# wheels, i.e. a faster wheel rate than a straight command of the same per-axis
+# speed. Scaling the whole command down keeps every wheel inside the range
+# that was actually measured.
+MAX_TESTED_RPS = 1.0
 
 # Motor ids in the order the kinematic model uses them.
 MOTOR_FIELDS: tuple[str, ...] = ("front_left", "rear_left", "front_right", "rear_right")
@@ -161,7 +216,11 @@ def command_for_speed(speed_mps: float, *, c_eff_m: float = C_EFF_M,
     return speed_mps / (efficiency * c_eff_m)
 
 
-def is_above_stall_threshold(rate_rps: float, *, threshold_rps: float = STALL_THRESHOLD_RPS) -> bool:
+def is_above_stall_threshold(
+    rate_rps: float,
+    *,
+    threshold_rps: float = STALL_THRESHOLD_RPS,
+) -> bool:
     """True when ``rate_rps`` is high enough for the wheels to actually turn.
 
     0,15 rps makes the motors buzz without moving; 0,3 rps drives. The UI uses
@@ -177,10 +236,14 @@ def wheel_speeds(
     *,
     model: MecanumModel = DEFAULT_MODEL,
 ) -> dict[str, float]:
-    """Return the rolling speed of each wheel (m/s) for a body velocity.
+    """Return the forward-axis speed of each wheel (m/s) for a body velocity.
 
     Body frame: ``linear_x`` forward (m/s), ``linear_y`` to the left (m/s),
     ``angular_z`` counter-clockwise seen from above (rad/s).
+
+    The roller projection is divided by ``cos(45 deg)`` so that a straight
+    forward command gives the wheels exactly ``linear_x`` -- that is what ties
+    the model to the measured ``C_eff``.
     """
     speeds: dict[str, float] = {}
     for field in MOTOR_FIELDS:
@@ -188,11 +251,12 @@ def wheel_speeds(
         cos_a = math.cos(angle)
         sin_a = math.sin(angle)
         forward_offset, left_offset = WHEEL_POSITION_M[field]
-        speeds[field] = (
+        rolling = (
             linear_x * cos_a
             + linear_y * sin_a
             - angular_z * (forward_offset * sin_a + left_offset * cos_a)
         )
+        speeds[field] = rolling / PROJECTION_FACTOR
     return speeds
 
 
@@ -204,6 +268,7 @@ def motor_commands(
     model: MecanumModel = DEFAULT_MODEL,
     c_eff_m: float = C_EFF_M,
     efficiency: float = EFFICIENCY,
+    max_rate_rps: float = MAX_TESTED_RPS,
 ) -> dict[str, float]:
     """Return the motor rate (rps) per wheel for a body velocity.
 
@@ -215,10 +280,30 @@ def motor_commands(
     scaled_y = linear_y / efficiency
     scaled_z = angular_z / efficiency
     speeds = wheel_speeds(scaled_x, scaled_y, scaled_z, model=model)
-    return {
+    commands = {
         field: model.sign(field) * speed / c_eff_m
         for field, speed in speeds.items()
     }
+    return clamp_to_max_rate(commands, max_rate_rps=max_rate_rps)
+
+
+def clamp_to_max_rate(
+    commands: dict[str, float],
+    *,
+    max_rate_rps: float = MAX_TESTED_RPS,
+) -> dict[str, float]:
+    """Scale a whole command set down so no wheel exceeds ``max_rate_rps``.
+
+    Scaling (rather than clipping) keeps the *direction* of the motion intact:
+    clipping one wheel would turn a diagonal into a curve.
+    """
+    if not commands:
+        return commands
+    peak = max(abs(rate) for rate in commands.values())
+    if peak <= max_rate_rps or peak == 0.0:
+        return commands
+    factor = max_rate_rps / peak
+    return {field: rate * factor for field, rate in commands.items()}
 
 
 def command_for_body_velocity(
@@ -229,11 +314,13 @@ def command_for_body_velocity(
     model: MecanumModel = DEFAULT_MODEL,
     c_eff_m: float = C_EFF_M,
     efficiency: float = EFFICIENCY,
+    max_rate_rps: float = MAX_TESTED_RPS,
 ) -> list[tuple[int, float]]:
     """Return ``(motor_id, rps)`` pairs ready for :func:`build_motor_frame`."""
     commands = motor_commands(
         linear_x, linear_y, angular_z,
         model=model, c_eff_m=c_eff_m, efficiency=efficiency,
+        max_rate_rps=max_rate_rps,
     )
     return [(MOTOR_IDS[field], commands[field]) for field in MOTOR_FIELDS]
 

@@ -1,16 +1,17 @@
 """Chassis adapter tests.
 
-No hardware: the offline adapter validates but transmits nothing, and the serial
-placeholder refuses to transmit entirely.
+No hardware: the offline adapter validates but transmits nothing, and the live
+serial adapter refuses to transmit until its port is actually opened.
 """
 
 from __future__ import annotations
 
 import math
 
-from amr_core.robot.chassis import OfflineChassisAdapter, SerialChassisAdapter
+from amr_core.robot.chassis import OfflineChassisAdapter
 from amr_core.robot.interfaces import ChassisCommand, ConnectionState
 from amr_core.robot.safety import SpeedLimits
+from amr_core.robot.serial_chassis import SerialChassisAdapter
 
 
 def test_offline_adapter_validates_clamps_and_never_transmits() -> None:
@@ -47,10 +48,10 @@ def test_connection_loss_is_reported_not_hidden() -> None:
     assert adapter.state() is ConnectionState.DISCONNECTED
 
 
-def test_serial_adapter_refuses_to_transmit() -> None:
+def test_serial_adapter_refuses_to_transmit_before_the_port_is_open() -> None:
     adapter = SerialChassisAdapter()
     outcome = adapter.submit(ChassisCommand(0.1, 0.0, 0.0))
-    assert outcome.accepted is False
+    assert outcome.accepted is True
     assert outcome.transmitted is False
-    assert adapter.state() is ConnectionState.UNAVAILABLE
-    assert adapter.last_command() is None
+    assert adapter.state() is ConnectionState.DISABLED
+    assert adapter.last_command() == ChassisCommand(0.1, 0.0, 0.0)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from amr_core.lidar.config import LidarConfig
+from amr_core.robot.serial_chassis import DEFAULT_PORT as DEFAULT_CHASSIS_PORT
 from amr_dashboard.app import run
 
 
@@ -34,6 +35,26 @@ def main() -> None:
         action="store_true",
         help="do not open the LiDAR serial port",
     )
+
+    # Live chassis options. WITHOUT --chassis-live the dashboard keeps the
+    # offline adapter: commands are validated and clamped but never sent, and
+    # the robot cannot move. --chassis-live is the single switch that turns
+    # the dashboard into something that actually drives the robot, so it is
+    # never implied by the port name or by an environment variable.
+    chassis = parser.add_argument_group("Chassis")
+    chassis.add_argument(
+        "--chassis-port",
+        default=DEFAULT_CHASSIS_PORT,
+        help=f"serial port of the STM32 chassis (default {DEFAULT_CHASSIS_PORT})",
+    )
+    chassis.add_argument(
+        "--chassis-live",
+        action="store_true",
+        help=(
+            "DRIVE THE REAL ROBOT: open the chassis port and let the dashboard "
+            "send motor commands. Without this flag the chassis stays offline."
+        ),
+    )
     args = parser.parse_args()
 
     config = LidarConfig.from_env()
@@ -43,7 +64,14 @@ def main() -> None:
         enabled=False if args.no_lidar else None,
     )
 
-    run(host=args.host, port=args.port, reload=args.reload, lidar_config=config)
+    run(
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+        lidar_config=config,
+        chassis_port=args.chassis_port,
+        chassis_live=args.chassis_live,
+    )
 
 
 if __name__ in {"__main__", "__mp_main__"}:

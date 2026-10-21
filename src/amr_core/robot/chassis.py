@@ -3,8 +3,11 @@
 The dashboard talks to the chassis only through the ``ChassisAdapter`` protocol.
 In this phase the only usable adapter is :class:`OfflineChassisAdapter`: it
 validates and records commands but transmits nothing.
-:class:`SerialChassisAdapter` is a deliberate placeholder that refuses to
-transmit until the STM32 serial protocol is verified on the school's board.
+
+The real transport lives in :mod:`amr_core.robot.serial_chassis`
+(:class:`~amr_core.robot.serial_chassis.SerialChassisAdapter`). It is not
+installed by default: the dashboard only selects it when the operator starts
+the server with ``--chassis-live``.
 """
 
 from __future__ import annotations
@@ -58,33 +61,3 @@ class OfflineChassisAdapter:
             transmitted=False,
             reason="stop recorded; no verified chassis transport (nothing transmitted)",
         )
-
-
-class SerialChassisAdapter:
-    """Placeholder for a future verified serial transport — refuses to transmit."""
-
-    name = "serial-unverified"
-
-    def __init__(self, port: str = "/dev/ttyACM0", limits: SpeedLimits | None = None) -> None:
-        self.port = port
-        self.limits = limits if limits is not None else SpeedLimits()
-        self._last: ChassisCommand | None = None
-
-    def state(self) -> ConnectionState:
-        return ConnectionState.UNAVAILABLE
-
-    def last_command(self) -> ChassisCommand | None:
-        return self._last
-
-    def submit(self, command: ChassisCommand) -> CommandOutcome:
-        return CommandOutcome(
-            accepted=False,
-            transmitted=False,
-            reason=(
-                "serial chassis transport is not implemented: the STM32 protocol is "
-                "unverified on this board (see docs/robot_integration.md)"
-            ),
-        )
-
-    def stop(self) -> CommandOutcome:
-        return self.submit(ChassisCommand())

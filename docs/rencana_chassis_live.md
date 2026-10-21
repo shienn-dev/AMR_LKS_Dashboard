@@ -253,19 +253,34 @@ python run_dashboard.py --chassis-port /dev/ttyACM0 --chassis-live
 
 ## 7. Tahapan dan gerbang
 
-| Tahap | Isi | Testing | Gerbang |
-| --- | --- | --- | --- |
-| **P0** | Encoder frame motor pindah ke `stm32_protocol.py`; `wheel_test.py` ikut memakainya | tes unit: byte frame motor identik dengan output lama | byte identik → lanjut |
-| **P1** | `kinematics.py` (murni): (vx,vy,wz) → 4 rps, skala m/s→rps | tes unit: maju murni → semua roda berimpit; 0,0 → semua 0; simetri kiri/kanan | fungsi murni, tanpa I/O → lanjut |
-| **P2** | `motion_guard.py`: heartbeat, lease, latch, state machine | tes unit: heartbeat telat → STOP; lease ganda → tolak | guard bisa diuji tanpa robot → lanjut |
-| **P3** | `serial_chassis.py`: thread, stream 50 Hz, STOP di finally, state jujur | tes dengan port **palsu** (loopback in-memory) — jumlah frame, urutan, STOP terakhir | tidak ada byte yang salah → lanjut |
-| **P4** | UI hold-to-move + slider + ARM + panel state | tes UI yang ada + tes manual di browser | → gerbang hardware |
-| **P5** | **Gerbang hardware**: roda terangkat, G1.1–G1.5 (identifikasi tanda) | observasi langsung | semua pola teridentifikasi |
-| **P6** | Gerbang hardware: lantai, 0,05 m/s, jarak diukur, spotter + E-stop | penggaris + observasi | jarak masuk akal, tidak jatuh dari 0,19 m/s |
-| **P7** | Aktifkan lateral & putar di lantai, satu arah satu waktu | penggaris + pengukur sudut | siap dipakai |
+Status per 2026-10-21: **P0–P4 selesai** (offline, tanpa robot). **P5–P7
+menunggu operator di Lander.** P5 adalah gerbang wajib: tanpa pola tanda
+lateral/putar yang terverifikasi, tidak ada gerak lantai dari dashboard.
 
-**P0–P4 sepenuhnya offline** — bisa dikerjakan dan direview tanpa robot.
+| Tahap | Isi | Testing | Gerbang | Status |
+| --- | --- | --- | --- | --- |
+| **P0** | Encoder frame motor pindah ke `stm32_protocol.py`; `wheel_test.py` ikut memakainya | tes unit: byte frame motor identik dengan output lama | byte identik → lanjut | **selesai** |
+| **P1** | `kinematics.py` (murni): (vx,vy,wz) → 4 rps, skala m/s→rps | tes unit: maju → pola terverifikasi; 0,0 → semua 0; rate ≤ 1,0 rps | fungsi murni, tanpa I/O → lanjut | **selesai** |
+| **P2** | `motion_guard.py`: heartbeat, lease, latch, state machine | tes unit: heartbeat telat → STOP; lease ganda → tolak | guard bisa diuji tanpa robot → lanjut | **selesai** |
+| **P3** | `serial_chassis.py`: thread, stream 50 Hz, STOP di finally, state jujur | tes dengan port **palsu** — jumlah frame, isi frame, STOP terakhir | tidak ada byte yang salah → lanjut | **selesai** |
+| **P4** | UI hold-to-move + slider + panel state; aktivasi opt-in `--chassis-live` | tes render panel (offline + live) + smoke test | → gerbang hardware | **selesai** |
+| **P5** | **Gerbang hardware**: roda terangkat, G1.1–G1.5 (identifikasi tanda) | observasi langsung | semua pola teridentifikasi | **menunggu** |
+| **P6** | Gerbang hardware: lantai, 0,05 m/s, jarak diukur, spotter + E-stop | penggaris + observasi | jarak masuk akal, tidak jatuh dari 0,19 m/s | **menunggu** |
+| **P7** | Aktifkan lateral & putar di lantai, satu arah satu waktu | penggaris + pengukur sudut | siap dipakai | **menunggu** |
+
+**P0–P4 sepenuhnya offline** — sudah dikerjakan dan bisa direview tanpa robot.
 P5–P7 butuh operator di lokasi.
+
+### 7.1 Yang berubah dari rencana awal
+
+| Rencana | Kenyataan |
+| --- | --- |
+| Encoder motor dipindah ke `amr_core` | sama — tapi `amr_core.robot` **dilarang** mengimpor pyserial (ada guard test), jadi pembuka port pindah ke `amr_dashboard/chassis_transport.py` |
+| `SerialChassisAdapter` di `amr_core.robot.chassis` | jadi modul baru `amr_core/robot/serial_chassis.py`; placeholder lama di `chassis.py` dihapus karena sudah usang (protokolnya sudah terverifikasi) |
+| Tanda lateral/putar tidak dipublish | **pola lengkap justru dipublish** di `kinematics.direction_report()`: maju terverifikasi, putar cocok dengan observasi "uniform = berputar", lateral tetap **hipotesis** yang harus diuji G1 |
+| Batas `linear_y` / `angular_z` diturunkan (O1) | disetel `0,05 m/s` dan `0,20 rad/s` di `robot_runtime.LIVE_LIMITS`, terpisah dari default `safety.py` |
+| Slider min 0,05 m/s | jadi **0,06 m/s** (= 0,33 rps, di atas 0,3 rps yang terbukti jalan) |
+| Batas rate rodanya tidak disinggung | ditambah invariant baru: **tidak ada perintah yang boleh melebihi 1,0 rps**, rate tertinggi yang pernah diukur — penting karena perintah diagonal tanpa batas ini menuntut 2,07 rps |
 
 ---
 
@@ -285,16 +300,18 @@ P5–P7 butuh operator di lokasi.
 
 ---
 
-## 9. Keputusan yang masih terbuka
+## 9. Keputusan yang sudah diambil dan yang masih terbuka
 
-| # | Pertanyaan | Rekomendasi |
-| --- | --- | --- |
-| O1 | Batas `linear_y` dan `angular_z` di versi pertama? | 0,05 m/s dan 0,20 rad/s, sampai ada pengukuran di lantai |
-| O2 | Slider berarti kecepatan target (yang dimaksud operator) atau kecepatan perintah? | **Target** — operator melihat kecepatan yang dia maksud, bukan kecepatan yang benar-benar terjadi |
-| O3 | Batas bawah slider? | 0,06 m/s (≈0,33 rps) — di atas 0,3 rps yang terbukti jalan |
-| O4 | Reaksi heartbeat 300 ms atau 150 ms? | 300 ms dulu; 150 ms kalau jarak tempuh terasa lama |
-| O5 | ARM eksplisit per sesi, atau cukup tombol "live"? | ARM eksplisit + lease |
-| O6 | Keyboard (WASD) sebagai cara utama? | Ya — menekan tombol mouse sambil robot bergerak terasa jauh lebih melelahkan daripada menekan keyboard |
+| # | Pertanyaan | Keputusan | Status |
+| --- | --- | --- | --- |
+| O1 | Batas `linear_y` dan `angular_z` di versi pertama? | 0,05 m/s dan 0,20 rad/s, sampai ada pengukuran di lantai | **diputuskan** — di `robot_runtime.LIVE_LIMITS` |
+| O2 | Slider berarti kecepatan target atau kecepatan perintah? | **Target** — operator melihat kecepatan yang dia maksud | **diputuskan** — slider 0,06–0,19 m/s |
+| O3 | Batas bawah slider? | 0,06 m/s (≈0,33 rps) — di atas 0,3 rps yang terbukti jalan | **diputuskan** — `chassis_panel.MIN_SPEED_MPS` |
+| O4 | Reaksi heartbeat 300 ms atau 150 ms? | 300 ms dulu; 150 ms kalau jarak tempuh terasa lama | **diputuskan** — `MotionGuard` default 0,3 s (belum diuji di lapangan) |
+| O5 | ARM eksplisit per sesi, atau cukup tombol "live"? | Lease kendali: satu sesi saja yang boleh memegang kontrol | **diputuskan** — tanpa tombol ARM terpisah; `arm()` diambil saat operator menekan tombol arah |
+| O6 | Keyboard (WASD) sebagai cara utama? | Ya | **belum dikerjakan** — versi pertama pakai tombol tahan-tekan; keyboard menyusul |
+| O7 | Batas rate roda | Tidak boleh melebihi **1,0 rps** (rate tertinggi yang pernah diukur) | **diputuskan** — `kinematics.MAX_TESTED_RPS` |
+| O8 | Gerbang hardware | P5 (identifikasi tanda) harus lewat sebelum ada gerak lantai | **menunggu** operator |
 
 ---
 
@@ -311,10 +328,15 @@ P5–P7 butuh operator di lokasi.
 
 ---
 
-## Lampiran — Batas yang tidak berubah di revisi ini
+## Lampiran — Batas yang berubah dan yang tidak
 
-Tidak ada bagian dari rencana ini yang mengubah
-`src/amr_core/robot/safety.py`. Batas kecepatan tetap **0,19 / 0,30 / 1,20**
-sampai ada keputusan eksplisit lain. Penurunan batas `linear_y` dan
-`angular_z` (O1) adalah satu-satunya perubahan yang diizinkan, dan hanya
-setelah pengukuran di lantai.
+`src/amr_core/robot/safety.py` **tidak** diubah: default `SpeedLimits` tetap
+**0,19 / 0,30 / 1,20**, dan tes regresinya tetap berlaku.
+
+Batas **live** ada di lapisan yang berbeda, `robot_runtime.LIVE_LIMITS`:
+`0,19 / 0,05 / 0,20`. Batas lateral dan putar diturunkan karena angka
+sebelumnya (0,30 m/s dan 1,20 rad/s) tidak pernah diuji di robot ini. Keduanya
+naik lagi hanya setelah ada pengukuran di lantai.
+
+Batas ketiga ada di `kinematics.MAX_TESTED_RPS = 1,0`: tidak ada perintah yang
+boleh membuat roda berputar lebih cepat dari rate yang pernah terukur.

@@ -990,3 +990,69 @@ dibatalkan — video hanya dibutuhkan untuk cabang penjelasan mekanisme
 - Verifikasi: `333 passed` pada seluruh suite; `All checks passed!` untuk Ruff.
 - Tidak ada aktuasi, tidak ada perubahan pada `src/amr_core/robot/`, tidak ada
   commit, push, reset, clean, atau pergantian branch.
+
+## 20. Jalur dashboard ke robot — P0–P4 dari rencana chassis langsung (21 Oktober 2026)
+
+Rencana ada di `docs/rencana_chassis_live.md`. Tahap ini mengerjakan P0–P4:
+seluruhnya **offline**, tanpa robot, tanpa port, dan direview lewat diff.
+P5–P7 (gerbang hardware) belum dikerjakan.
+
+**Perubahan kode**
+
+- `src/amr_core/robot/stm32_protocol.py` — menambah `build_motor_frame()`.
+  Encoder frame motor sekarang tinggal satu; `scripts/wheel_test.py` memakainya
+  juga, jadi skrip dan dashboard tidak bisa berbeda pendapat soal byte.
+- `src/amr_core/robot/kinematics.py` (baru) — kinematika invers mecanum:
+  (vx, vy, wz) → 4 perintah roda, skala m/s → rps, dan `direction_report()` yang
+  menampilkan pola tiap arah dalam bentuk perintah motor.
+- `src/amr_core/robot/motion_guard.py` (baru) — fail-safe kontrol tahan-tekan:
+  heartbeat klien, lease kendali, latch E-stop software.
+- `src/amr_core/robot/serial_chassis.py` (baru) — adapter serial yang
+  benar-benar mengirim: thread pemilik port, stream 50 Hz, frame stop di
+  `finally`, state koneksi yang jujur.
+- `src/amr_core/robot/chassis.py` — placeholder `SerialChassisAdapter` yang
+  selalu menolak dihapus (alasan penolakannya sudah usang: protokolnya
+  terverifikasi di sesi 2).
+- `src/amr_dashboard/chassis_panel.py` (baru) — panel kontrol tahan-tekan.
+- `src/amr_dashboard/chassis_transport.py` (baru) — satu-satunya tempat yang
+  mengimpor pyserial (pembuka port dengan DTR/RTS turun sebelum `open()`).
+- `src/amr_dashboard/robot_runtime.py` — memilih adapter live/offline, batas
+  live (`LIVE_LIMITS`), dan siklus hidup port.
+- `src/amr_dashboard/app.py` — merender panel chassis **sekali** di luar region
+  yang di-refresh (tombol yang di-re-render menelan event "lepas"), melepas
+  gerakan saat browser disconnect dan saat struktur halaman dibangun ulang.
+- `src/amr_dashboard/__main__.py` — flag `--chassis-port` dan `--chassis-live`.
+- `tests/test_robot_kinematics.py`, `tests/test_robot_motion_guard.py`,
+  `tests/test_robot_serial_chassis.py`, `tests/test_dashboard_chassis_panel.py`
+  (baru).
+
+**Perubahan pada tes yang ada**
+
+- `tests/test_robot_no_actuation.py` — placeholder yang selalu menolak
+  transmitter diganti assertion yang lebih relevan: adapter live **tidak boleh
+  mengirim apa pun sebelum port dibuka**.
+- `tests/test_robot_chassis.py` — import placeholder dipindah ke modul barunya.
+
+**Temuan yang mengubah rencana**
+
+- Pola tanda **maju** yang dihitung persis sama dengan pola terverifikasi di
+  lantai (`1:- 2:- 3:+ 4:+`), dan **putar di tempat** menghasilkan tanda sama
+  di keempat motor — cocok dengan observasi sesi 2 bahwa perintah seragam
+  membuat robot berputar, bukan maju. Pola **lateral** masih turunan, bukan
+  hasil ukur, dan itu sebabnya gerbang G1 tetap wajib.
+- Skala di-anchor ke pengukuran: 0,19 m/s → 1,036 rps, yaitu titik uji
+  `u = 1,0` yang pernah diukur di lantai.
+- **Perintah diagonal tanpa batas akan menuntut 2,07 rps** — di atas rentang
+  yang pernah diuji. Ditambahkan invariant: tidak ada perintah yang boleh
+  melebihi 1,0 rps.
+- `amr_core.robot` **dilarang** mengimpor pyserial (ada guard test). Pembuka
+  port karena itu pindah ke `amr_dashboard/chassis_transport.py`; logika
+  adapter tetap murni dan bisa diuji tanpa device.
+
+**Verifikasi**: `370 passed` pada seluruh suite; `All checks passed!` untuk
+Ruff; `scripts/smoke_dashboard.py` exit 0 (HTTP 200); `run_dashboard.py
+--help` menampilkan kelompok flag chassis.
+
+**Tidak ada aktuasi**: tidak ada port yang dibuka, tidak ada byte yang
+dikirim, tidak ada perintah motor yang dijalankan. Batas `safety.py` tidak
+diubah. Tidak ada commit, push, reset, clean, atau pergantian branch.
