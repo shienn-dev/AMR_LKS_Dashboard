@@ -1,9 +1,10 @@
-"""STM32 robot-controller serial protocol: pure, read-only frame decoder.
+"""STM32 robot-controller serial protocol: pure frame codec.
 
 The chassis/arm/IMU controller is an STM32 board on ``/dev/ttyACM0`` (USB
-``1a86:55d4``). This module decodes the **byte stream the board sends**. It never
-opens a port, never writes a byte and never commands the robot: it is a pure
-function of the bytes handed to it by the caller.
+``1a86:55d4``). This module decodes the **byte stream the board sends** and
+encodes the **frames the board accepts**. It never opens a port, never writes a
+byte and never commands the robot by itself: it is a pure function of the bytes
+handed to it by the caller.
 
 Frame layout (agreed by the shipped Hiwonder "LanderAsli" SDK and the upstream
 ``Hiwonder/LanderPi`` SDK)::
@@ -39,11 +40,16 @@ Decoded payloads (only formats that are actually known)
   not decoded.
 - ``KEY`` (func 6): 2 bytes = key id, key event (see ``KEY_EVENT_*``).
 
-Every other function (LED=1, BUZZER=2, MOTOR=3, PWM_SERVO=4, BUS_SERVO=5,
-GAMEPAD=8, SBUS=9, OLED=10) is recognised by *number* but its payload is **not
-decoded** here, because its exact layout is uncertain — the raw payload is
-returned and no interpretation is invented. No encoder-feedback function is
+Every other function (LED=1, BUZZER=2, PWM_SERVO=4, BUS_SERVO=5,
+GAMEPAD=8, SBUS=9, OLED=10) is recognised by *number* but its payload is
+**not decoded** here, because its exact layout is uncertain — the raw payload
+is returned and no interpretation is invented. No encoder-feedback function is
 known to exist in either SDK.
+
+``MOTOR`` (func 3) is the one function that is **encoded** here (see
+:func:`build_motor_frame`): its layout is confirmed on this robot's board
+(motor ids 1..4, speed in rps), and the board accepts it. It is still never
+*decoded*, because the board does not echo motor frames back.
 
 Version note: the shipped SDK has ``PACKET_FUNC_NONE = 11`` and no RGB function;
 the upstream SDK adds ``RGB = 11`` with ``NONE = 12``. This decoder does not
@@ -230,6 +236,26 @@ def build_frame(function: int, payload: bytes = b"") -> bytes:
     frame.extend(payload)
     frame.append(crc8(frame[2:]))
     return bytes(frame)
+
+
+def build_motor_frame(speeds: list[tuple[int, float]]) -> bytes:
+    """Encode one func-3 MOTOR frame: ``[0x01, n, (id-1, rps) x n]``.
+
+    ``speeds`` is a list of ``(motor_id, rps)`` pairs. The speed is a float32 in
+    revolutions per second (rps), little endian. Motor ids are 1..4 and are sent
+    as ``id - 1``.
+
+    This is the **single** motor-frame encoder in the repository: the
+    supervised wheel test (:mod:`scripts.wheel_test`) and the dashboard's
+    serial chassis adapter both use it, so the two can never disagree about
+    the bytes that reach the board.
+    """
+    payload = bytearray([0x01, len(speeds)])
+    for motor_id, rps in speeds:
+        if not 1 <= motor_id <= 4:
+            raise ValueError(f"motor id must be 1..4, got {motor_id}")
+        payload.extend(struct.pack("<Bf", motor_id - 1, float(rps)))
+    return build_frame(Stm32Function.MOTOR, bytes(payload))
 
 
 class FrameDecoder:

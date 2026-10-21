@@ -153,3 +153,8 @@ python scripts/smoke_dashboard.py   # server + GET '/' (HTTP 200)
    resmi + pengukuran, sebelum menambahkan transport arm.
 4. Untuk kamera: setujui instalasi SDK Deptrum (dependency besar) sebelum
    menulis adapter frame.
+
+Rencana implementasi rincinya — kinematika mecanum, adapter serial, fail-safe
+hold-to-move, dan gate verifikasi hardware — ada di
+`docs/rencana_chassis_live.md` (21 Oktober 2026). Point 3 di atas masih
+berlaku: jalur kontrol harus diverifikasi di board sekolah lebih dulu.

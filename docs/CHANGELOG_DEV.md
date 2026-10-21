@@ -924,3 +924,69 @@ bukti dan diturunkan menjadi `0.19`. Batas `max_linear_y=0.30` dan
 - Tidak ada uji hardware pada perubahan ini; menaikkan kembali ke 0.30 memerlukan
   uji 0,3 m/s di area panjang dengan E-stop.
 - Tidak ada commit, push, reset, clean, atau pergantian branch.
+
+## 18. Persiapan Sesi 4 — protokol eksperimen dan alat analisis offline (21 Oktober 2026)
+
+Sesi 3 meninggalkan dua hal terbuka: ketidakpastian `C_eff` (20,72 ± 1,84 cm,
+CV 8,9 %) dan pemisahan dua model yang masih hidup — rasio konstan ~0,885 vs
+offset jarak tetap ~4,89 cm. Tahap ini **menyiapkan** protokalnya, belum
+menghasilkan temuan empiris baru.
+
+**Tidak ada aktuasi pada tahap ini.** Mesin penyusun tidak punya
+`/dev/ttyACM0` (Windows) dan akses SSH ke `stematel-pi5` ditolak
+(`Permission denied (publickey,password)`). Karena itu seluruh tabel data di
+`docs/sesi_4.md` sengaja dikosongkan — isinya menunggu operator di Lander.
+Tidak ada angka yang dikira-kira.
+
+- Perubahan (tambahan baru, tanpa file lama yang diubah):
+  - `docs/sesi_4.md` — protokol tiga eksperimen, prediksi, aturan keputusan,
+    kerangka analisis, lembar catatan, checklist lantai, dan paket perintah.
+  - `scripts/analyze_sesi4.py` — alat analisis offline: statistik `C_eff`,
+    prediksi kedua model, ambang keputusan 101 cm / 105 cm, uji tanpa-`C_eff`
+    (`D = Y9 − 3·Y3`), fit model rasio/offset/gabung dengan residual, rms, dan
+    χ², serta laju free-wheel. Skrip tidak membuka port serial dan tidak
+    mengirim perintah motor.
+  - `tests/test_analyze_sesi4.py` — 15 tes untuk aritmetika di atas. Semua
+    data di dalam tes adalah **sintetis**, bukan data sesi.
+- Analisis yang sudah dihitung di dokumen (tanpa hardware): dengan `C_eff`
+  sesi 3, band 1σ prediksi 9 s saling menimpa (90,2–107,8 cm untuk rasio vs
+  97,5–116,5 cm untuk offset), sehingga percobaan 2 hanya bisa memakai
+  ambang mutlak itu bila `C_eff` membaik; karena itu ada uji pengganti
+  `D = Y9 − 3·Y3` yang tidak bergantung pada `C_eff` sama sekali.
+- Verifikasi: `333 passed` pada seluruh suite (318 lama + 15 baru);
+  `All checks passed!` untuk Ruff; `git status --short` bersih selain tiga
+  berkas baru.
+- Batas kecepatan tidak disentuh: `max_linear_x` tetap 0,19 m/s,
+  `max_linear_y` 0,30 dan `max_angular_z` 1,20 tidak diubah. Tidak ada uji
+  `u > 1,0` maupun 0,30 m/s.
+- Tidak ada commit, push, reset, clean, atau pergantian branch.
+
+## 19. Rencana aktivasi chassis langsung dari dashboard (21 Oktober 2026)
+
+Permintaan operator berubah arah: target sesi 4 (memisahkan model rasio vs
+offset) diturunkan prioritasnya, karena blocker sebenarnya untuk "robot bisa
+digerakkan dari dashboard" adalah **transport**, bukan kalibrasi. Video pun
+dibatalkan — video hanya dibutuhkan untuk cabang penjelasan mekanisme
+(start delay vs ramp), bukan untuk keputusan rasio-vs-offset.
+
+**Belum ada kode yang ditulis.** Bagian ini hanya rencana untuk review.
+
+- Perubahan:
+  - `docs/rencana_chassis_live.md` (baru) — rencana implementasi: lima celah
+    yang harus ditutup (transport serial, pemilihan adapter, encoder frame
+    motor di `amr_core`, kinematika mecanum, semantik hold-to-move), rancangan
+    fail-safe delapan lapis, tahapan P0–P7 dengan gerbang, dan risiko.
+  - `docs/robot_integration.md` — penunjuk ke rencana tersebut di §7.
+- Keputusan operator yang masuk rencana: **hold-to-move** (bukan klik-sekali)
+  dan cakupan **maju/mundur/samping/putar**.
+- Temuan yang mengubah rencana: pola tanda untuk **lateral dan putar belum
+  pernah diverifikasi** — hanya pola maju yang terverifikasi lewat translasi
+  (commit `f8de64e` mengoreksi konvensi lama yang salah karena ditentukan
+  dengan roda terangkat). Karena itu identifikasi tanda menjadi **gate G1**
+  sebelum ada gerak di lantai dari dashboard.
+- Batas yang tidak berubah: `max_linear_x` 0,19 m/s, `max_linear_y` 0,30,
+  `max_angular_z` 1,20. Yang boleh diturunkan (bukan dinaikkan) adalah batas
+  lateral dan putar, sampai ada pengukuran lantai.
+- Verifikasi: `333 passed` pada seluruh suite; `All checks passed!` untuk Ruff.
+- Tidak ada aktuasi, tidak ada perubahan pada `src/amr_core/robot/`, tidak ada
+  commit, push, reset, clean, atau pergantian branch.

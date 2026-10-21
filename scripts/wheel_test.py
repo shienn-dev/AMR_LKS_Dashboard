@@ -54,7 +54,6 @@ files. It only opens the serial port, writes frames, and closes it.
 from __future__ import annotations
 
 import argparse
-import struct
 import sys
 import time
 from pathlib import Path
@@ -62,7 +61,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from amr_core.robot.stm32_protocol import Stm32Function, build_frame  # noqa: E402
+from amr_core.robot.stm32_protocol import build_motor_frame as _build_motor_frame  # noqa: E402
 
 DEFAULT_PORT = "/dev/ttyACM0"
 DEFAULT_SPEED_RPS = 0.15
@@ -79,14 +78,12 @@ STOP_SPEED = 0.0
 
 
 def build_motor_frame(speeds: list[tuple[int, float]]) -> bytes:
-    """Encode a func-3 MOTOR frame: ``[0x01, n, (id-1, rps) x n]``."""
-    payload = bytearray([0x01, len(speeds)])
-    for motor_id, rps in speeds:
-        if not 1 <= motor_id <= 4:
-            raise ValueError(f"motor id must be 1..4, got {motor_id}")
-        payload.extend(struct.pack("<Bf", motor_id - 1, float(rps)))
-    return build_frame(Stm32Function.MOTOR, bytes(payload))
+    """Encode a func-3 MOTOR frame: ``[0x01, n, (id-1, rps) x n]``.
 
+    Thin re-export of :func:`amr_core.robot.stm32_protocol.build_motor_frame`
+    so this script and the dashboard's serial adapter cannot drift apart.
+    """
+    return _build_motor_frame(speeds)
 
 def resolve_speeds(args: argparse.Namespace) -> list[tuple[int, float]]:
     """Return the ``(motor_id, rps)`` pairs to send.

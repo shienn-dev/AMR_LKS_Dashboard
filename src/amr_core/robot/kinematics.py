@@ -1,0 +1,276 @@
+"""Mecanum inverse kinematics: body-frame velocity -> per-wheel motor commands.
+
+Pure computation. This module never opens a port, never writes a byte and never
+commands the robot: it turns a desired body velocity into the four motor
+commands the STM32 expects.
+
+Why this module is careful about signs
+--------------------------------------
+The sign convention on this robot has already been wrong once. Commit
+``f8de64e`` corrected it: the earlier mapping (forward = ``1:+,2:+,3:-,4:-``)
+was derived by watching the wheels spin **with the robot lifted**, where only
+rotation is visible and chassis translation is not. The robot actually drove
+backwards. The corrected, verified convention is:
+
+======================  ==========================================
+Motor id                Wheel (verified on hardware, sesi 2 §9.5)
+======================  ==========================================
+1                       front left
+2                       rear left
+3                       front right
+4                       rear right
+======================  ==========================================
+
+======================  ==========================================
+Motion                   Motor commands (verified)
+======================  ==========================================
+forward                  ``1:-  2:-  3:+  4:+``
+======================  ==========================================
+
+The *lateral* and *yaw* patterns are **not** verified on the floor. They are
+derived here from the roller arrangement, so they carry the same kind of risk
+the old forward convention carried. :func:`direction_report` prints every
+direction in the exact motor-command form so the result can be compared with
+what the robot actually does, and the signs are isolated in
+:class:`MecanumModel` so a wrong guess is a one-line data change, not a code
+change.
+
+Geometry
+--------
+``L`` (track width, centre to centre) and ``H`` (wheelbase, centre to centre)
+are measured on this robot: 145 mm and 135 mm (sesi 3 §10). ``C_eff`` (distance
+travelled per wheel revolution) is 20,72 +/- 1,84 cm (sesi 3 §6).
+
+Scale
+-----
+The board takes **rps** (revolutions per second). To make the dashboard slider
+mean "metres per second on the floor", the commanded rate is
+
+.. code-block:: text
+
+    u = v / (EFFICIENCY * C_EFF)
+
+with ``EFFICIENCY`` = 0,885, the ground efficiency measured in sesi 3 §7. That
+figure is **not** final (the ratio-vs-offset question is still open, and
+``C_eff`` has 8,9 % uncertainty), so the scale is a named constant that can be
+replaced once session 4 produces better numbers.
+
+Sanity anchors
+--------------
+* ``u = 1,0`` rps with the forward pattern measured 0,19 m/s on the floor.
+  :func:`command_for_speed` therefore returns ~1,036 rps for 0,19 m/s, which
+  is the same operating point the hardware has actually been tested at.
+* 0,15 rps stalls the motors completely and 0,3 rps drives (sesi 2 §9.7), so
+  the useful low end is ~0,3 rps. :func:`is_above_stall_threshold` exists so
+  the UI can warn instead of letting the robot buzz without moving.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+
+# Measured on this robot (sesi 3 §10). SI units.
+TRACK_WIDTH_M = 0.145
+WHEELBASE_M = 0.135
+
+# Distance travelled per wheel revolution (sesi 3 §6): 20,72 +/- 1,84 cm.
+C_EFF_M = 0.2072
+C_EFF_SD_M = 0.0184
+
+# Ground efficiency measured in sesi 3 §7 (83-92 %, working value 0,885).
+# NOT final: the "constant ratio" vs "fixed offset" question is still open.
+EFFICIENCY = 0.885
+
+# Motors stall below ~0,2-0,3 rps and drive at 0,3 rps (sesi 2 §9.7).
+STALL_THRESHOLD_RPS = 0.3
+
+# Motor ids in the order the kinematic model uses them.
+MOTOR_FIELDS: tuple[str, ...] = ("front_left", "rear_left", "front_right", "rear_right")
+MOTOR_IDS: dict[str, int] = {
+    "front_left": 1,
+    "rear_left": 2,
+    "front_right": 3,
+    "rear_right": 4,
+}
+
+#: Rolling direction of each wheel, in degrees, measured from the robot's
+#: forward axis and positive toward the left. This encodes the roller
+#: arrangement (ABAB, from the chassis documentation) and is the assumption
+#: that the floor verification has to confirm.
+ROLLER_DIRECTION_DEG: dict[str, float] = {
+    "front_left": 45.0,
+    "rear_left": 135.0,
+    "front_right": 135.0,
+    "rear_right": 45.0,
+}
+
+#: Maps a wheel's rolling sense to the motor command sign. The forward column
+#: is fixed by the verified pattern above; the other two are derived from the
+#: roller arrangement and are the values to check at the hardware gate.
+COMMAND_SIGN: dict[str, int] = {
+    "front_left": -1,
+    "rear_left": 1,
+    "front_right": -1,
+    "rear_right": 1,
+}
+
+#: Wheel positions in the robot frame: forward offset and left offset.
+WHEEL_POSITION_M: dict[str, tuple[float, float]] = {
+    "front_left": (WHEELBASE_M / 2.0, TRACK_WIDTH_M / 2.0),
+    "rear_left": (-WHEELBASE_M / 2.0, TRACK_WIDTH_M / 2.0),
+    "front_right": (WHEELBASE_M / 2.0, -TRACK_WIDTH_M / 2.0),
+    "rear_right": (-WHEELBASE_M / 2.0, -TRACK_WIDTH_M / 2.0),
+}
+
+
+@dataclass(frozen=True)
+class MecanumModel:
+    """Roller arrangement and motor-sign mapping used by the kinematics.
+
+    The defaults are the values documented above. Changing them is how a
+    wrong assumption found during the hardware gate gets corrected -- no code
+    change is needed.
+    """
+
+    roller_direction_deg: dict[str, float] = None  # type: ignore[assignment]
+    command_sign: dict[str, int] = None  # type: ignore[assignment]
+
+    def roller_deg(self, field: str) -> float:
+        return (self.roller_direction_deg or ROLLER_DIRECTION_DEG)[field]
+
+    def sign(self, field: str) -> int:
+        return (self.command_sign or COMMAND_SIGN)[field]
+
+
+DEFAULT_MODEL = MecanumModel()
+
+
+def command_for_speed(speed_mps: float, *, c_eff_m: float = C_EFF_M,
+                      efficiency: float = EFFICIENCY) -> float:
+    """Return the motor rate (rps) that should produce ``speed_mps`` on the floor.
+
+    ``u = v / (efficiency * C_eff)``. With the session-3 constants, 0,19 m/s
+    maps to ~1,036 rps, which is the operating point that was actually measured
+    on the floor.
+    """
+    if c_eff_m <= 0.0:
+        raise ValueError("c_eff_m must be positive")
+    if efficiency <= 0.0:
+        raise ValueError("efficiency must be positive")
+    return speed_mps / (efficiency * c_eff_m)
+
+
+def is_above_stall_threshold(rate_rps: float, *, threshold_rps: float = STALL_THRESHOLD_RPS) -> bool:
+    """True when ``rate_rps`` is high enough for the wheels to actually turn.
+
+    0,15 rps makes the motors buzz without moving; 0,3 rps drives. The UI uses
+    this to warn the operator instead of silently doing nothing.
+    """
+    return abs(rate_rps) >= threshold_rps
+
+
+def wheel_speeds(
+    linear_x: float,
+    linear_y: float,
+    angular_z: float,
+    *,
+    model: MecanumModel = DEFAULT_MODEL,
+) -> dict[str, float]:
+    """Return the rolling speed of each wheel (m/s) for a body velocity.
+
+    Body frame: ``linear_x`` forward (m/s), ``linear_y`` to the left (m/s),
+    ``angular_z`` counter-clockwise seen from above (rad/s).
+    """
+    speeds: dict[str, float] = {}
+    for field in MOTOR_FIELDS:
+        angle = math.radians(model.roller_deg(field))
+        cos_a = math.cos(angle)
+        sin_a = math.sin(angle)
+        forward_offset, left_offset = WHEEL_POSITION_M[field]
+        speeds[field] = (
+            linear_x * cos_a
+            + linear_y * sin_a
+            - angular_z * (forward_offset * sin_a + left_offset * cos_a)
+        )
+    return speeds
+
+
+def motor_commands(
+    linear_x: float,
+    linear_y: float,
+    angular_z: float,
+    *,
+    model: MecanumModel = DEFAULT_MODEL,
+    c_eff_m: float = C_EFF_M,
+    efficiency: float = EFFICIENCY,
+) -> dict[str, float]:
+    """Return the motor rate (rps) per wheel for a body velocity.
+
+    The body velocity is scaled to the floor speed the operator asked for
+    (``efficiency`` compensates the measured ground loss), then distributed over
+    the wheels by :func:`wheel_speeds` and converted to rps.
+    """
+    scaled_x = linear_x / efficiency
+    scaled_y = linear_y / efficiency
+    scaled_z = angular_z / efficiency
+    speeds = wheel_speeds(scaled_x, scaled_y, scaled_z, model=model)
+    return {
+        field: model.sign(field) * speed / c_eff_m
+        for field, speed in speeds.items()
+    }
+
+
+def command_for_body_velocity(
+    linear_x: float,
+    linear_y: float,
+    angular_z: float,
+    *,
+    model: MecanumModel = DEFAULT_MODEL,
+    c_eff_m: float = C_EFF_M,
+    efficiency: float = EFFICIENCY,
+) -> list[tuple[int, float]]:
+    """Return ``(motor_id, rps)`` pairs ready for :func:`build_motor_frame`."""
+    commands = motor_commands(
+        linear_x, linear_y, angular_z,
+        model=model, c_eff_m=c_eff_m, efficiency=efficiency,
+    )
+    return [(MOTOR_IDS[field], commands[field]) for field in MOTOR_FIELDS]
+
+
+def direction_report(
+    *,
+    model: MecanumModel = DEFAULT_MODEL,
+    c_eff_m: float = C_EFF_M,
+    efficiency: float = EFFICIENCY,
+) -> list[str]:
+    """Return one line per direction with the exact motor commands it produces.
+
+    This is the table to compare against what the robot actually does at the
+    hardware gate: every line is a pattern the operator can read off the
+    wheels. The forward line must show ``1:- 2:- 3:+ 4:+`` (verified); the
+    lateral and yaw lines are the ones to confirm.
+    """
+    speed = 0.19
+    turn = 1.0
+    directions = [
+        ("maju (forward)", (speed, 0.0, 0.0)),
+        ("mundur (backward)", (-speed, 0.0, 0.0)),
+        ("samping kiri (strafe left)", (0.0, speed, 0.0)),
+        ("samping kanan (strafe right)", (0.0, -speed, 0.0)),
+        ("putar kiri (yaw CCW)", (0.0, 0.0, turn)),
+        ("putar kanan (yaw CW)", (0.0, 0.0, -turn)),
+        ("diagonal maju-kiri", (speed, speed, 0.0)),
+        ("diagonal maju-kanan", (speed, -speed, 0.0)),
+    ]
+    lines = []
+    for label, (vx, vy, wz) in directions:
+        pairs = command_for_body_velocity(
+            vx, vy, wz, model=model, c_eff_m=c_eff_m, efficiency=efficiency,
+        )
+        pattern = "  ".join(
+            f"{motor_id}:{'+' if rate >= 0 else '-'}" for motor_id, rate in pairs
+        )
+        rates = "  ".join(f"{motor_id}:{rate:+.3f}" for motor_id, rate in pairs)
+        lines.append(f"{label:24s} {pattern}   [{rates} rps]")
+    return lines
