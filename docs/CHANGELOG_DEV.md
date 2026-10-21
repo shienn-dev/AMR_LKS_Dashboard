@@ -1056,3 +1056,27 @@ Ruff; `scripts/smoke_dashboard.py` exit 0 (HTTP 200); `run_dashboard.py
 **Tidak ada aktuasi**: tidak ada port yang dibuka, tidak ada byte yang
 dikirim, tidak ada perintah motor yang dijalankan. Batas `safety.py` tidak
 diubah. Tidak ada commit, push, reset, clean, atau pergantian branch.
+
+## 21. Paket G1 — identifikasi tanda gerak (21 Oktober 2026)
+
+Paket procedure + lembar rekaman untuk gerbang hardware P5: memastikan pola
+tanda **samping** dan **putar** sebelum ada gerak lateral atau putar dari
+dashboard. Dua pola itu diturunkan dari susunan roller, bukan diukur, dan
+konvensi tanda versi lama di robot ini pernah terbalik persis karena
+ditentukan dengan roda terangkat (commit `f8de64e`).
+
+Perubahan:
+
+- `scripts/g1_patterns.py` (baru) — **hanya mencetak**, tidak mengirim apa
+  pun. Delapan perintah `wheel_test.py` dibangkitkan dari
+  `amr_core.robot.kinematics`, jadi pola yang diuji dijamin sama dengan
+  pola yang dipakai dashboard.
+- `docs/g1_identifikasi_tanda.md` (baru) — prasyarat, tahap 1 (roda
+  terangkat: arah putar tiap roda), tahap 2 (lantai: translasi nyata),
+  lembar rekaman, dan apa yang harus dilakukan kalau hasilnya meleset.
+
+Verifikasi: `370 passed`; `All checks passed!` untuk Ruff; skrip G1
+dijalankan dan keluarannya diperiksa (tanpa aktuasi).
+
+Tidak ada aktuasi, tidak ada perubahan pada `src/`, tidak ada commit, push,
+reset, clean, atau pergantian branch.
