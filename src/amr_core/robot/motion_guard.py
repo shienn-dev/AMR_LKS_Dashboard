@@ -42,7 +42,15 @@ from dataclasses import dataclass, field
 from amr_core.robot.interfaces import ChassisCommand
 
 #: A heartbeat older than this means the operator is no longer in control.
-DEFAULT_HEARTBEAT_TIMEOUT_S = 0.3
+#:
+#: 0,8 s rather than something tighter: the heartbeat travels through the
+#: dashboard's event loop, and that loop occasionally stalls for a few hundred
+#: milliseconds while a panel is rebuilt. A tighter limit turned those hiccups
+#: into "the robot stopped for no reason". The fast paths are unaffected --
+#: releasing the button, losing the focus, hiding the tab and a disconnect
+#: all stop the robot immediately. This timeout is only the backstop for a
+#: client that dies silently.
+DEFAULT_HEARTBEAT_TIMEOUT_S = 0.8
 
 #: A motion request is only accepted if the heartbeat is at least this fresh.
 DEFAULT_HEARTBEAT_GRACE_S = 0.1

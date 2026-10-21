@@ -85,6 +85,13 @@ class SerialChassisStats:
     last_error: str = ""
     last_frame_at: float = 0.0
     port_opened_at: float = 0.0
+    #: Measured frame rate over the last second. The board's watchdog stops the
+    #: motors when the frames stop arriving, so a rate below the target is a
+    #: direct suspect for the stuttering.
+    measured_rate_hz: float = 0.0
+    #: Largest gap between two frames since the port was opened, in seconds.
+    #: This is the number that matters for the board's watchdog.
+    max_gap_s: float = 0.0
 
 
 class SerialChassisAdapter:
@@ -121,6 +128,8 @@ class SerialChassisAdapter:
         self._state = ConnectionState.DISABLED
         self._last: ChassisCommand | None = None
         self.stats = SerialChassisStats()
+        self._frames_in_sample = 0
+        self._sample_started_at = self._clock()
 
     # --- lifecycle --------------------------------------------------------- #
 
@@ -260,8 +269,19 @@ class SerialChassisAdapter:
             self.stats.last_error = f"{type(exc).__name__}: {exc}"
             self._state = ConnectionState.DISCONNECTED
             return False
+        now = self._clock()
+        if self.stats.last_frame_at:
+            gap = now - self.stats.last_frame_at
+            if gap > self.stats.max_gap_s:
+                self.stats.max_gap_s = gap
         self.stats.frames_sent += 1
-        self.stats.last_frame_at = self._clock()
+        self.stats.last_frame_at = now
+        self._frames_in_sample += 1
+        if now - self._sample_started_at >= 1.0:
+            span = now - self._sample_started_at
+            self.stats.measured_rate_hz = self._frames_in_sample / span
+            self._frames_in_sample = 0
+            self._sample_started_at = now
         return True
 
     def _stream_loop(self) -> None:

@@ -1189,3 +1189,48 @@ test exit 0.
 
 Tidak ada aktuasi dari repo ini. Tidak ada commit, push, reset, clean, atau
 pergantian branch.
+
+## 25. Tanda lateral terbalik, instrumen stream, dan progres sementara sesi 4 (21 Oktober 2026)
+
+Temuan lapangan lewat jalur dashboard (robot **tetap offline** untuk
+pengerjaan repo ini):
+
+- **Kiri dan kanan terbalik** — "kiri" mendorong robot ke kanan, "kanan" ke
+  kiri. **Putaran benar** di kedua arah, maju benar. Ini persis risiko yang
+  diiated oleh gerbang G1 sejak awal.
+- Keempat motor masih nyendet, gerakan masih lambat, heartbeat kadang hilang.
+- Roda depan kanan (motor 3) tidak berputar di lantai, padahal keempat motor
+  berputar normal saat roda terangkat → motor dan kabel aman, masalahnya di
+  roda/roller.
+
+**Perubahan kode**
+
+- `src/amr_core/robot/kinematics.py` — `LATERAL_SIGN = -1`. Sumbu lateral
+  model dicerminkan, sesuai pengukuran lantai. Maju dan putar **tidak**
+  tersentuh (keduanya terverifikasi). Perbaikannya satu konstanta, bukan
+  perubahan kode — itulah gunanya gerbang hardware.
+- `src/amr_core/robot/motion_guard.py` — ambang heartbeat 0,3 s → 0,8 s. Yang
+  tight turned hiccup event loop menjadi "robot berhenti tanpa sebab". Jalur
+  cepat (lepas tombol, kehilangan fokus, tab disembunyikan, disconnect)
+  tetap berhenti seketika; ambang ini hanya jaring pengaman untuk klien yang
+  mati diam-diam.
+- `src/amr_core/robot/serial_chassis.py` — instrumen: laju stream terukur (Hz)
+  dan jeda frame terbesar. Ini yang memisahkan "nyendet karena motor/roda"
+  dari "nyendet karena frame jatuh dan watchdog board aktif".
+- `src/amr_dashboard/robot_panel.py` + `app.py` — panel arm dipindahkan keluar
+  region yang di-refresh tiap 0,5 s (sekalian memperbaiki bug: field joint
+  arm dihapus tiap 0,5 s, jadi tidak bisa diketik) dan mengurangi beban event loop
+  yang membuat frame motor terlambat.
+- `src/amr_dashboard/chassis_panel.py` — status bar menampilkan laju stream,
+  jeda terbesar, jumlah frame, dan waktu tahan.
+
+**Catatan**
+
+- `docs/sesi_4.md` §A: progres sementara — data jarak yang sudah terkumpul,
+  apa yang kata data itu tentang model rasio-vs-offset, temuan lapangan, dan
+  apa yang harus dibenahi sebelum eksperimen 1–3 bisa dijalankan.
+
+Verifikasi: `378 passed`, `1 skipped`; `All checks passed!` untuk Ruff.
+
+Tidak ada aktuasi dari repo ini. Tidak ada commit, push, reset, clean, atau
+pergantian branch.

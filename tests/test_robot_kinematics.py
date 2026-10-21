@@ -50,6 +50,27 @@ def test_strafe_splits_the_wheels_into_two_diagonals() -> None:
     assert signs[0] != signs[1]
 
 
+def test_strafe_left_drives_the_robot_left() -> None:
+    """Verified on the floor on 2026-10-21: left and right were swapped.
+
+    The first version of the model had the lateral axis mirrored, and the robot
+    drove the wrong way. This test locks the corrected pattern so it cannot
+    silently flip back.
+    """
+    left = k.command_for_body_velocity(0.0, 0.19, 0.0)
+    right = k.command_for_body_velocity(0.0, -0.19, 0.0)
+    assert _pattern(left) == (1, -1, 1, -1)
+    assert _pattern(right) == (-1, 1, -1, 1)
+    assert k.LATERAL_SIGN == -1.0
+
+
+def test_the_lateral_flip_does_not_touch_forward_or_yaw() -> None:
+    """Only the lateral axis may be mirrored; forward and yaw are verified."""
+    assert _pattern(k.command_for_body_velocity(0.19, 0.0, 0.0)) == (-1, -1, 1, 1)
+    assert _pattern(k.command_for_body_velocity(0.0, 0.0, 1.0)) == (1, 1, 1, 1)
+    assert _pattern(k.command_for_body_velocity(0.0, 0.0, -1.0)) == (-1, -1, -1, -1)
+
+
 def test_zero_command_stops_every_wheel() -> None:
     pairs = k.command_for_body_velocity(0.0, 0.0, 0.0)
     assert all(rate == 0.0 for _motor_id, rate in pairs)

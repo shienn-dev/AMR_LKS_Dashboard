@@ -170,6 +170,20 @@ COMMAND_SIGN: dict[str, int] = {
     "rear_right": 1,
 }
 
+#: Sign of the lateral contribution to the wheel speeds.
+#:
+#: **-1, verified on the floor on 2026-10-21.** The roller arrangement
+#: documented as ABAB comes from the chassis PDF and was never checked on this
+#: robot. The floor test showed that pressing "left" drove the robot to the
+#: right, and "right" drove it left -- the lateral axis of the model was
+#: mirrored. Forward was not affected (the forward pattern and the measured
+#: 18,0 cm at 0,06 m/s both check out) and neither was the turn, which was
+#: observed to be correct in both directions.
+#:
+#: This constant is the whole fix: the hardware gate exists precisely so that
+#: a wrong assumption becomes one number here instead of a code change.
+LATERAL_SIGN = -1.0
+
 #: Wheel positions in the robot frame: forward offset and left offset.
 WHEEL_POSITION_M: dict[str, tuple[float, float]] = {
     "front_left": (WHEELBASE_M / 2.0, TRACK_WIDTH_M / 2.0),
@@ -253,7 +267,7 @@ def wheel_speeds(
         forward_offset, left_offset = WHEEL_POSITION_M[field]
         rolling = (
             linear_x * cos_a
-            + linear_y * sin_a
+            + LATERAL_SIGN * linear_y * sin_a
             - angular_z * (forward_offset * sin_a + left_offset * cos_a)
         )
         speeds[field] = rolling / PROJECTION_FACTOR

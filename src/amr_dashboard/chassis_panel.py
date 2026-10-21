@@ -278,10 +278,18 @@ def _refresh_status(
     elapsed = ""
     if moving and hold.started_at is not None:
         elapsed = f"  |  hold {time.monotonic() - hold.started_at:5.1f} s"
+    stream = ""
+    stats = getattr(adapters.chassis, "stats", None)
+    if stats is not None:
+        stream = (
+            f"  |  stream {stats.measured_rate_hz:4.1f} Hz"
+            f"  max gap {stats.max_gap_s * 1000:5.0f} ms"
+            f"  frames {stats.frames_sent}"
+        )
     status.set_text(
         f"{'MOVING' if moving else 'idle'}{elapsed}  |  "
         f"command {hold.speed_mps:.2f} m/s -> {rate:.2f} rps{stall_note}  |  "
-        f"heartbeat {age:.2f} s  |  {guard.stopped_reason}"
+        f"heartbeat {age:.2f} s{stream}  |  {guard.stopped_reason}"
     )
 
 

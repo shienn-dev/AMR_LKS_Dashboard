@@ -1,11 +1,13 @@
 # Sesi 4 — Menutup Ketidakpastian `C_eff` dan Memisahkan Model Rasio vs Offset
 
-**Status: PARKED (21 Oktober 2026).** Priority operator berubah: target
-"dashboard bisa menggerakkan robot" lebih penting daripada pemisahan model
-rasio vs offset, dan video dibatalkan. Isi dokumen ini **tidak** dikerjakan
-lagi untuk sekarang; ia tetap berguna sebagai protocol kalau kalibrasi
-dipilih lagi nanti. Plan yang aktif ada di
-`docs/rencana_chassis_live.md`.
+**Status: PROGRESS SEMENTARA (21 Oktober 2026).** Kalibrasi sempat diparkir,
+lalu **dibuka lagi** karena ada temuan dari jalur dashboard: pola tanda lateral
+terbukti **tertuker** di lantai, dan dua=data jarak lantai yang tidak
+konsisten. Semua yang tertulis di sini berasal dari pengukuran di robot ini.
+
+**Tidak ada eksekusi hardware dari repo ini.** Eksperimen 1–3 di bawah tetap
+**belum dijalankan** (tabel data kosong). Yang sudah ada hanyalah temuan
+lapangan yang masuk lewat jalur dashboard — lihat §A.
 
 **Status:** **PROTOCOL SIAP — DATA BELUM ADA.** Sesi 4 belum melakukan aktuasi
 dari repo ini. Mesin penyusun adalah Windows tanpa `/dev/ttyACM0`, dan akses SSH
@@ -603,6 +605,88 @@ Catatan : ______________________________________________________________
 ```
 
 Angka `0.0` adalah **placeholder** — ganti dengan hasil ukur.
+
+---
+
+## A. Progres sementara 21 Oktober 2026 — data dari jalur dashboard
+
+Bagian ini dicatat terpisah dari protocol §5–§7, karena **bukan** hasil
+eksperimen 1–3. Semuanya berasal dari mengendarai robot dari dashboard
+(`docs/rencana_chassis_live.md`) di lantai. Robot **tetap offline** untuk
+temuannya di sini: tidak ada eksperimen yang dijalankan dari repo ini.
+
+### A.1 Data jarak yang sudah terkumpul
+
+| Uji | Perintah motor | Jarak (cm) | Durasi | Catatan |
+| --- | --- | --- | --- | --- |
+| P6-1 | 0,327 rps (`u = 0,6`, 3 s) | 18,2 | 3 s | slider 0,06 m/s |
+| P6-2 | idem | 17,0 | 3 s | idem |
+| P6-3 | idem | 18,8 | 3 s | idem |
+| P6-4 | 1,000 rps (slider penuh) | ~63 | **tidak dicatat** | slider 0,19 m/s |
+
+| Statistik (P6-1..3) | Nilai |
+| --- | --- |
+| Mean | **18,0 cm** |
+| sd (n−1) | 0,92 cm |
+| Kecepatan ter-realisasi | 18,0 / 3 = **6,0 cm/s = 0,060 m/s** |
+| Target slider | 0,060 m/s |
+| Realisasi | **100 %** |
+
+### A.2 Apa yang data ini giàsayakan tentang model
+
+| Model | Prediksi P6-1..3 (3 s) | Selisih |
+| --- | --- | --- |
+| Rasio konstan (`r = 0,885`) | **18,0 cm** | 0,0 cm |
+| Offset tetap (`k = 4,89 cm`) | 15,4 cm | −2,6 cm |
+
+Untuk slider penuh: rasio konstan memprediksi **55,0 cm**, offset
+**57,3 cm**, dan yang terukur **~63 cm**. Angka 63 cm itu **tidak konsisten**
+dengan 18,0 cm: efisiensi implisitnya 1,013 — lebih besar dari 1, yang tidak
+mungkin secara fisis.
+
+Dua penjelasan yang mungkin, dan keduanya harus diseluruh dengan pengukuran
+baru:
+
+1. **Durasi tahan lebih lama dari 3 detik.** 63 cm pada rasio 0,885 butuh
+   tahan **3,43 s**. Stopwatch adalah sumber galat yang paling mungkin.
+2. Roda yang macet membuat robot **terloncat-hop**, sehingga jarak terukur
+   lebih dari jarak kinematika.
+
+**Kesimpulan A.2:** data ini **mendukung model rasio** untuk kecepatan rendah
+(titik P6-1..3 cocok persis) dan **tidak** mendukung offset, tapi belum
+menggugurkan offset — galat `C_eff` ±8,9 % sudah ±1,6 cm pada jarak segitu.
+Satu titik (slider penuh) tidak cukup untuk memisahkan keduanya, dan
+ketidakkonsistenannya harus dibongkar dulu.
+
+### A.3 Temuan dari lapangan (bukan kalibrasi, tapi memengaruhi kalibrasi)
+
+| # | Temuan | Grade | Efek ke kalibrasi |
+| --- | --- | --- | --- |
+| A1 | **Pola tanda lateral terbalik**: "kiri" mendorong robot ke kanan, "kanan" ke kiri. **Putaran benar** di kedua arah, maju benar. | **TERUKUR** di lantai | Model kinematika dikoreksi: sumbu lateral dicerminkan (`kinematics.LATERAL_SIGN = -1`). **Tidak** mengubah model rasio-vs-offset, karena `C_eff` diukur dari gerak **maju** |
+| A2 | Roda depan kanan (motor 3) tidak berputar saat mundur; robot melenceng ke kanan. Empat motor berputar normal saat roda terangkat → motor & kabel aman, masalahnya di **roda/roller** | **TERUKUR** (terobservasi) | Semua angka jarak tercemar sampai roda diperbaiki; `C_eff` bisa ikut bergeser karena satu roda terseret |
+| A3 | Robot **lambat** di slider penuh; **nyendet** di semua arah; nyendet brutal di arena | **TERUKUR** (terobservasi) | Belum terisolasi: bisa dari roda yang macet (A2) atau dari frame yang jatuh (watchdog board). Instrumen baru (laju stream + jeda terbesar) dibuat untuk memisahkannya |
+| A4 | **Heartbeat kadang hilang** → robot berhenti mendadak | **TERUKUR** (terobservasi) | Tidak memengaruhi kalibrasi secara langsung, tapi membuat pengukuran jarak
+tidak bisa diulang → harus hilang dulu |
+| A5 | Fail-safe "Ctrl+W" (tab ditutup saat tombol ditekan): robot **berhenti tepat** | **TERUKUR** (terobservasi) | Tidak memengaruhi kalibrasi |
+
+### A.4 Apa yang harus dibenahi sebelum §5–§7 bisa dijalankan
+
+1. **Roda depan kanan** (A2) — mekanis, di Lander.
+2. **Nyendet** (A3) — lewat instrumen stream baru: kalau laju frame di bawah
+   50 Hz atau jeda terbesar besar, penyebabnya di sisi server, bukan motor.
+3. **Heartbeat** (A4) — ambang 0,3 s dinaikkan dan beban tick per 0,5 s
+   diperkecil.
+4. **Durasi tahan dicatat** dari panel (bukan stopwatch) — sudah ditambahkan.
+
+### A.5 Status sekarang
+
+| Item | Status |
+| --- | --- |
+| Eksperimen 1 (roll-out 10 putaran × 3) | **belum dijalankan** |
+| Eksperimen 2 (durasi 3 s vs 9 s) | **belum dijalankan** — dan akan menghasilkan data tercemar sampai A2 selesai |
+| Eksperimen 3 (free-wheel 20 putaran) | **belum dijalankan** |
+| Model rasio vs offset | **belum terpisah**; data A.1/A.2 cenderung ke rasio, belum konklusif |
+| Video | **dibatalkan** (tidak dibutuhkan untuk keputusan rasio-vs-offset) |
 
 ---
 

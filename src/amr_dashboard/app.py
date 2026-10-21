@@ -146,10 +146,13 @@ def _render_structure(
         mission_panel()
         lidar_view()
         robot_view()
-        # The chassis controls are interactive (hold-to-move), so they are built
-        # once and never refreshed: a button that is re-rendered while the
-        # pointer is down would swallow the release event.
+        # The interactive panels are built once and never refreshed: a button
+        # that is re-rendered while the pointer is down would swallow the
+        # release event, and an input field that is rebuilt every tick would
+        # eat what the operator is typing. They also cost the event loop the
+        # time the motor stream needs.
         chassis_panel.chassis_control_panel(robot_runtime.get_adapters())
+        robot_panel.arm_control_panel(robot_runtime.get_adapters())
         _render_vision_panel()
         mission_log()
 

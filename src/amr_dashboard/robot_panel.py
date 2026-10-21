@@ -2,15 +2,16 @@
 
 Every panel is honest about availability. A missing link is shown as
 NOT CONNECTED / UNAVAILABLE, never as a live feed or a fabricated pose. The
-chassis and arm controls submit to *offline* adapters that validate but never
-transmit, and the panel says so on every action.
+arm control submits to an *offline* adapter that validates but never
+transmits, and the panel says so on every action. The live chassis control
+lives in :mod:`amr_dashboard.chassis_panel`.
 """
 
 from __future__ import annotations
 
 from nicegui import ui
 
-from amr_core.robot.interfaces import ArmCommand, ChassisCommand, CommandOutcome, ConnectionState
+from amr_core.robot.interfaces import ArmCommand, CommandOutcome, ConnectionState
 from amr_dashboard.robot_runtime import RobotAdapters
 
 _STATE_COLOR: dict[ConnectionState, str] = {
@@ -22,12 +23,15 @@ _STATE_COLOR: dict[ConnectionState, str] = {
 
 
 def robot_panels(adapters: RobotAdapters) -> None:
-    """Render all robot subsystem panels (camera, odometry, chassis, arm)."""
+    """Render the read-only robot panels (camera, odometry).
+
+    The interactive panels (chassis, arm) are **not** here: they are rendered
+    once, outside the region the dashboard's refresh tick re-renders. A panel
+    that is rebuilt every 0,5 s loses whatever the operator was typing, and
+    it costs the event loop the time the motor stream needs.
+    """
     camera_panel(adapters)
     odometry_panel(adapters)
-    with ui.row().classes("w-full gap-4 items-stretch"):
-        chassis_control_panel(adapters)
-        arm_control_panel(adapters)
 
 
 def _state_badge(state: ConnectionState) -> None:
@@ -83,84 +87,6 @@ def odometry_panel(adapters: RobotAdapters) -> None:
                 _metric("v", f"{sample.linear_x:.2f} m/s")
                 _metric("omega", f"{sample.angular_z:.2f} rad/s")
                 _metric("stamp", f"{sample.stamp_s:.2f} s")
-
-
-def chassis_control_panel(adapters: RobotAdapters) -> None:
-    chassis = adapters.chassis
-    limits = chassis.limits
-    with ui.card().classes("flex-1 min-w-[320px]"):
-        with ui.row().classes("items-center gap-3"):
-            ui.icon("sports_esports")
-            ui.label("Remote chassis control").classes("text-sm text-gray-500 uppercase")
-            _state_badge(chassis.state())
-        ui.label(
-            "OFFLINE STRUCTURE — commands are validated and clamped to the limits "
-            "below, but NOT transmitted: no verified chassis transport exists yet."
-        ).classes("text-xs text-red-700")
-        ui.label(
-            f"Limits: +/-{limits.max_linear_x:.2f} m/s (x), "
-            f"+/-{limits.max_linear_y:.2f} m/s (y), "
-            f"+/-{limits.max_angular_z:.2f} rad/s (rot)"
-        ).classes("text-xs text-gray-600")
-
-        step_x, step_y, step_w = 0.10, 0.10, 0.50
-
-        def _move(vx: float = 0.0, vy: float = 0.0, wz: float = 0.0) -> None:
-            _report(chassis.submit(ChassisCommand(vx, vy, wz)))
-
-        with ui.row().classes("gap-2"):
-            ui.button("Forward", icon="arrow_upward", on_click=lambda: _move(vx=step_x))
-            ui.button("Back", icon="arrow_downward", on_click=lambda: _move(vx=-step_x))
-        with ui.row().classes("gap-2"):
-            ui.button("Left", icon="arrow_back", on_click=lambda: _move(vy=step_y))
-            ui.button("Right", icon="arrow_forward", on_click=lambda: _move(vy=-step_y))
-        with ui.row().classes("gap-2"):
-            ui.button("Rotate L", icon="rotate_left", on_click=lambda: _move(wz=step_w))
-            ui.button("Rotate R", icon="rotate_right", on_click=lambda: _move(wz=-step_w))
-        ui.button("STOP", icon="stop", on_click=lambda: _report(chassis.stop())).props(
-            "color=orange"
-        )
-
-        ui.separator()
-        _estop_controls(adapters)
-
-        last = chassis.last_command()
-        if last is not None:
-            ui.label(
-                f"Last validated command: vx={last.linear_x:.2f}, vy={last.linear_y:.2f}, "
-                f"wz={last.angular_z:.2f} (NOT transmitted)"
-            ).classes("text-xs text-gray-500 font-mono")
-
-
-def _estop_controls(adapters: RobotAdapters) -> None:
-    estop = adapters.estop
-    if estop.latched:
-        ui.label(f"SOFTWARE E-STOP LATCHED ({estop.reason})").classes(
-            "text-sm font-bold text-red-700"
-        )
-    else:
-        ui.label("Software E-stop: not latched.").classes("text-xs text-gray-500")
-
-    def _trip() -> None:
-        estop.trip("operator (software)")
-        adapters.chassis.stop()
-        ui.notify(
-            "Software E-STOP latched. This is NOT the physical E-stop.",
-            color="negative",
-            position="top",
-        )
-
-    confirmed = ui.checkbox("I have verified the robot area is safe to clear the stop")
-
-    def _clear() -> None:
-        if estop.clear(confirmed_safe=bool(confirmed.value)):
-            ui.notify("Software E-STOP cleared.", color="positive")
-        else:
-            ui.notify("Not cleared: confirm the area is safe first.", color="warning")
-
-    with ui.row().classes("gap-2"):
-        ui.button("E-STOP (software)", icon="pan_tool", on_click=_trip).props("color=red")
-        ui.button("Clear stop", icon="lock_open", on_click=_clear).props("outline")
 
 
 def arm_control_panel(adapters: RobotAdapters) -> None:
