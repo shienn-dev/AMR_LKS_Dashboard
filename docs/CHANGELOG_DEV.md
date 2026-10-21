@@ -1080,3 +1080,42 @@ dijalankan dan keluarannya diperiksa (tanpa aktuasi).
 
 Tidak ada aktuasi, tidak ada perubahan pada `src/`, tidak ada commit, push,
 reset, clean, atau pergantian branch.
+
+## 22. Hasil P6 pertama dan perbaikan stream idle (21 Oktober 2026)
+
+Uji pertama di lantai lewat dashboard: maju, slider 0,06 m/s, ditahan 3 detik,
+jarak diukur dengan penggaris.
+
+| Trial | Jarak (cm) |
+| --- | --- |
+| 1 | 18,2 |
+| 2 | 17,0 |
+| 3 | 18,8 |
+
+Mean **18,0 cm** (sd 0,92) untuk 3 detik = **0,060 m/s = 100 % dari slider**.
+Kecepatan **PASS**: rantainya jalan dan slider berarti m/s yang benar. Titik
+data ini sekaligus mendukung model rasio (prediksi 18,0 cm) dibanding offset
+(15,4 cm), tanpa menyingkirkan offset — galat `C_eff` ±8,9 % sudah ±1,6 cm
+pada jarak segitu.
+
+**Temuan open:** roda depan kanan (motor 3) tidak berputar saat mundur dan
+robot melenceng ke kanan; robot lambat di slider penuh; suara mesin tetap
+berbunyi setelah berhenti. Semuanya tercatat di
+`docs/rencana_chassis_live.md` §7.3. Gerbang G1 **ditunda** sampai keempat
+roda terbukti berputar.
+
+**Perbaikan kode — stream idle jadi diam**
+
+- `src/amr_core/robot/serial_chassis.py` — setelah perintah selesai, adapter
+  mengirim beberapa frame stop lalu **berhenti streaming**. Sebelumnya
+  frame kecepatan-nol dikirim terus-menerus saat idle, sehingga driver motor
+  tetap teregang dan robot **mendengung setelah setiap berhenti** (diamati
+  di lantai). Sekarang diam, dan watchdog board yang menahan motor mati —
+  perilaku yang sama dengan `wheel_test.py` yang menutup port setelah stop.
+- Tes: dua tes lama disesuaikan (port terbuka kini diam sampai ada perintah)
+  dan satu tes baru, `test_the_stream_goes_quiet_when_idle`.
+
+Verifikasi: `371 passed`; `All checks passed!` untuk Ruff.
+
+Tidak ada aktuasi dari repo ini. Tidak ada commit, push, reset, clean, atau
+pergantian branch.

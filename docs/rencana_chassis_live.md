@@ -282,6 +282,48 @@ P5–P7 butuh operator di lokasi.
 | Slider min 0,05 m/s | jadi **0,06 m/s** (= 0,33 rps, di atas 0,3 rps yang terbukti jalan) |
 | Batas rate rodanya tidak disinggung | ditambah invariant baru: **tidak ada perintah yang boleh melebihi 1,0 rps**, rate tertinggi yang pernah diukur — penting karena perintah diagonal tanpa batas ini menuntut 2,07 rps |
 
+### 7.2 Hasil P6 pertama (21 Oktober 2026)
+
+Uji pertama di lantai **lewat dashboard**, maju, slider 0,06 m/s, ditahan 3
+detik, jarak diukur dengan penggaris dari garis start.
+
+| Trial | Jarak (cm) |
+| --- | --- |
+| 1 | 18,2 |
+| 2 | 17,0 |
+| 3 | 18,8 |
+
+| Statistik | Nilai |
+| --- | --- |
+| Mean | **18,0 cm** |
+| sd (n−1) | 0,92 cm |
+| Kecepatan ter-realisasi | 18,0 / 3 = **6,0 cm/s = 0,060 m/s** |
+| Target slider | 0,060 m/s |
+| Realisasi | **100 %** |
+
+| Model | Prediksi | Selisih vs terukur |
+| --- | --- | --- |
+| Rasio konstan | 18,0 cm | **0,0 cm** |
+| Offset tetap 4,89 cm | 15,4 cm | −2,6 cm |
+
+**Verdict: kecepatan PASS.** Rantainya jalan (browser → server → port → motor)
+dan slider berarti m/s yang benar. Ini sekaligus titik data pertama untuk
+pertanyaan rasio-vs-offset yang diparkir: **mendukung model rasio**, tapi
+belum mengetikannya — galat `C_eff` ±8,9 % sudah ±1,6 cm pada jarak segitu,
+sehingga offset 4,89 cm belum tersingkir.
+
+### 7.3 Temuan open P6 — belum tertutup
+
+| # | Temuan | Status | Dampak |
+| --- | --- | --- | --- |
+| F1 | **Roda depan kanan (motor 3) tidak berputar** saat mundur; robot melenceng ke kanan | OPEN — perlu isolasi per motor | G1 (identifikasi tanda) **harus ditunda**; pola tanda dihitung untuk 4 roda yang jalan |
+| F2 | **Robot lambat** di slider penuh (0,19 m/s) | OPEN — belum ada angka jarak/waktu | Kemungkinan besar F1: roda mecanum yang mati **diseret menyamping** → gesekan besar |
+| F3 | **Suara mesin tetap berbunyi** setelah berhenti, hilang saat bagian belakang sedikit terangkat | FIXED di kode | Penyebab: adapter mengirim frame kecepatan-nol terus-menerus saat idle → driver tetap teregang → robot mendengung. Sekarang idle = diam, dan watchdog board yang menahan motor mati. F3 juga bisa menunjuk roda yang macet (kannot(k)ak) — perlu dibedakan lewat uji "matikan dashboard, masih berbunyi atau tidak" |
+| F4 | Fail-safe belum diuji | OPEN | Prosedur sudah ada (tab ditutup / Wi-Fi mati / E-stop dari tab lain / proses di-Ctrl+C) |
+
+**Prasyarat sebelum G1:** F1 selesai dan keempat roda terbukti berputar.
+Tanpa itu, identifikasi tanda menghasilkan data yang tidak trustworthy.
+
 ---
 
 ## 8. Risiko dan mitigasi

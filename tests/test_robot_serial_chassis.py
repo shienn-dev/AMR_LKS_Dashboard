@@ -67,13 +67,24 @@ def _adapter(port: FakePort, **kwargs) -> SerialChassisAdapter:
     )
 
 
-def test_open_reports_connected_and_streams_frames() -> None:
+def test_open_reports_connected_and_stays_quiet_until_a_command() -> None:
+    """An open port with no command sends nothing.
+
+    The board's watchdog holds the motors off when the stream is quiet, which
+    is what keeps the robot from humming while it is idle.
+    """
     port = FakePort()
-    adapter = _adapter(port)
+    guard = MotionGuard()
+    adapter = _adapter(port, guard=guard)
     assert adapter.open() is ConnectionState.CONNECTED
     time.sleep(0.05)
-    adapter.close()
+    assert port.written == []
+    guard.arm("session-a")
+    guard.heartbeat("session-a")
+    guard.request_motion("session-a", ChassisCommand(0.19, 0.0, 0.0))
+    time.sleep(0.05)
     assert len(port.written) >= 3
+    adapter.close()
     assert adapter.state() is ConnectionState.DISABLED
 
 
@@ -108,6 +119,30 @@ def test_releasing_the_motion_sends_zero_rates() -> None:
     adapter.close()
     stopped = [f for f in port.written if all(r == 0.0 for _i, r in decode_motor_frame(f))]
     assert stopped, "expected a frame with all motor rates zero"
+
+
+def test_the_stream_goes_quiet_when_idle() -> None:
+    """After a stop the adapter must stop sending frames.
+
+    Streaming zero-speed frames keeps the motor driver energised, and the
+    robot was observed to hum after every stop because of it. Idle means
+    silence: the board's watchdog holds the motors off.
+    """
+    port = FakePort()
+    guard = MotionGuard()
+    adapter = _adapter(port, guard=guard)
+    adapter.open()
+    guard.arm("session-a")
+    guard.heartbeat("session-a")
+    guard.request_motion("session-a", ChassisCommand(0.19, 0.0, 0.0))
+    time.sleep(0.02)
+    guard.release_motion("session-a")
+    time.sleep(0.05)
+    sent_after_stop = len(port.written)
+    time.sleep(0.05)
+    assert len(port.written) == sent_after_stop, "the stream kept going while idle"
+    assert adapter.state() is ConnectionState.CONNECTED, "the port must stay open"
+    adapter.close()
 
 
 def test_close_sends_a_final_stop_frame() -> None:
@@ -152,8 +187,12 @@ def test_a_dead_port_is_reported_as_disconnected() -> None:
             raise OSError("device disconnected")
 
     port = BrokenPort()
-    adapter = _adapter(port)
+    guard = MotionGuard()
+    adapter = _adapter(port, guard=guard)
     adapter.open()
+    guard.arm("session-a")
+    guard.heartbeat("session-a")
+    guard.request_motion("session-a", ChassisCommand(0.19, 0.0, 0.0))
     time.sleep(0.05)
     assert adapter.state() is ConnectionState.DISCONNECTED
     assert "device disconnected" in adapter.stats.last_error

@@ -60,6 +60,11 @@ DEFAULT_RATE_HZ = 50.0
 #: needs a moment after a USB CDC open.
 DEFAULT_SETTLE_S = 0.3
 
+#: How many stop frames are sent when a command ends, before the stream goes
+#: quiet. A burst makes the stop explicit; after that the board's watchdog
+#: holds the motors off, so the robot does not hum while idle.
+STOP_FRAME_BURST = 3
+
 
 class SerialPort(Protocol):
     """The small part of ``serial.Serial`` this adapter needs."""
@@ -260,8 +265,22 @@ class SerialChassisAdapter:
         return True
 
     def _stream_loop(self) -> None:
+        """Send the current command at the frame rate; go quiet when idle.
+
+        While a command is active the frames are streamed continuously, because
+        the board's firmware stops the motors when the command stream stops
+        (verified on hardware, sesi 2 §9.3).
+
+        When the command ends, a short burst of stop frames is sent and then the
+        stream **stops**. The board's watchdog then holds the motors off. This
+        matters: continuously streaming zero-speed frames keeps the motor
+        driver energised, so the robot hums after every stop -- it was observed
+        on the floor, and it is also the behaviour that makes the robot hard to
+        push around while the dashboard is open.
+        """
         period = 1.0 / self.rate_hz
         next_send = self._clock() + self.settle_s
+        stop_frames_left = 0
         while not self._closing.is_set():
             now = self._clock()
             if now < next_send:
@@ -269,8 +288,18 @@ class SerialChassisAdapter:
                 continue
             next_send += period
             command = self.guard.poll()
-            frame = self._stop_frame() if command is None else self._frame_for(command)
-            if not self._write(frame):
+            if command is None:
+                if stop_frames_left > 0:
+                    if not self._write(self._stop_frame()):
+                        break
+                    stop_frames_left -= 1
+                else:
+                    # Idle: send nothing and let the board's watchdog hold the
+                    # motors off.
+                    time.sleep(period)
+                continue
+            stop_frames_left = STOP_FRAME_BURST
+            if not self._write(self._frame_for(command)):
                 break
         # The stream ended: make sure the board is not left with a live command.
         self._write(self._stop_frame())

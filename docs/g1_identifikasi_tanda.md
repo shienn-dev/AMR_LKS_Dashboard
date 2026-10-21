@@ -11,6 +11,13 @@ mengirim apa pun)
 
 ## 1. Kenapa gerbang ini wajib
 
+> **Tertunda (21 Oktober 2026).** P6 pertama menemukan **roda depan kanan
+> (motor 3) tidak berputar** saat robot mundur, dan robot melenceng ke kanan.
+> Pola tanda di bawah dihitung untuk empat roda yang berjalan, jadi G1 **harus
+> ditunda sampai motor 3 diperbaiki dan keempat roda terbukti berputar** —
+> kalau tidak, data yang dikumpulkan justru menyesatkan.
+> Lihat `docs/rencana_chassis_live.md` §7.2–§7.3.
+
 Pola tanda **maju** sudah terverifikasi di lantai. Pola tanda **samping** dan
 **putar** belum pernah diuji di robot ini — keduanya **diturunkan** dari
 susunan roller.
