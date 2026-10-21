@@ -29,7 +29,7 @@ ARM_DURATION_MAX_S = 30.0
 class SpeedLimits:
     """Maximum chassis velocities the dashboard will ever validate (SI units)."""
 
-    max_linear_x: float = 0.30
+    max_linear_x: float = 0.19
     max_linear_y: float = 0.30
     max_angular_z: float = 1.20
 

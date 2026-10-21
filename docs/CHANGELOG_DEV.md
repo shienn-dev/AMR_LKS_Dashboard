@@ -910,3 +910,17 @@ PRD) dan belum dilakukan.
 - [x] Perubahan lokal sebelumnya tetap terjaga.
 - [x] Tidak ada commit, push, reset, clean, atau pergantian branch.
 - [ ] Verifikasi robot fisik — **belum diverifikasi** (di luar cakupan).
+
+## 17. Penurunan batas linear_x setelah audit Sesi 3 (21 Oktober 2026)
+
+Data Sesi 3 hanya menguji sampai `u=1,0` dengan kecepatan lantai terukur
+0,19 m/s. Batas default `SpeedLimits.max_linear_x=0.30` karena itu 1,6x di atas
+bukti dan diturunkan menjadi `0.19`. Batas `max_linear_y=0.30` dan
+`max_angular_z=1.20` tidak diubah karena gerak samping dan putar belum diuji.
+
+- Perubahan: `src/amr_core/robot/safety.py` (`max_linear_x` 0.30 -> 0.19).
+- Tes baru: `tests/test_robot_safety.py::test_default_linear_x_cap_matches_tested_speed`.
+- Verifikasi: `13 passed` pada tes safety/chassis; `318 passed` pada seluruh suite.
+- Tidak ada uji hardware pada perubahan ini; menaikkan kembali ke 0.30 memerlukan
+  uji 0,3 m/s di area panjang dengan E-stop.
+- Tidak ada commit, push, reset, clean, atau pergantian branch.

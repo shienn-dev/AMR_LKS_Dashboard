@@ -30,6 +30,13 @@ def test_within_limits_is_unchanged() -> None:
     assert clamped == ChassisCommand(0.1, 0.0, -0.2)
 
 
+def test_default_linear_x_cap_matches_tested_speed() -> None:
+    limits = SpeedLimits()
+    clamped, reason = validate_chassis_command(ChassisCommand(0.30, 0.0, 0.0), limits)
+    assert reason == ""
+    assert clamped == ChassisCommand(0.19, 0.0, 0.0)
+
+
 def test_rejects_non_finite() -> None:
     limits = SpeedLimits()
     for bad in (math.nan, math.inf, -math.inf):
