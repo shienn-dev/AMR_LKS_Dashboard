@@ -1157,3 +1157,35 @@ Verifikasi: `373 passed`; `All checks passed!` untuk Ruff.
 
 Tidak ada aktuasi dari repo ini. Tidak ada commit, push, reset, clean, atau
 pergantian branch.
+
+## 24. Dua proses satu port, dan dashboard yang gagal bind (21 Oktober 2026)
+
+Dari lapangan: `run_dashboard.py --chassis-live` dijalankan padahal dashboard
+lama masih melayani port 8080. Hasilnya: port web gagal bind
+(`Errno 98 address already in use`) **setelah** port `/dev/ttyACM0` sudah
+dibuka — sehingga **dua proses menulis frame motor ke board yang sama**.
+Perangkat USB CDC tidak menegakkan akses eksklusif, jadi ini mungkin terjadi
+tanpa error apa pun.
+
+- `src/amr_dashboard/chassis_transport.py` — `other_processes_holding()`
+  memindai `/proc/*/fd` untuk mencari proses lain yang sudah membuka port.
+  Pembuka port **menolak** membuka kalau port itu sedang dipegang proses
+  lain, dan pemeriksaan dilakukan **sebelum** pyserial diimpor.
+- `src/amr_dashboard/app.py` — `ui.run()` dibungkus `try/except/finally`:
+  (1) `Errno 98` dicetak sebagai pesan yang bisa ditindaklanjuti
+  (`fuser -v 8080/tcp`, `fuser -k 8080/tcp`) bukan stack trace; (2) port
+  chassis **selalu** ditutup di `finally`, apa pun yang terjadi — robot tidak
+  pernah ditinggalkan dengan perintah hidup.
+- Tes: `tests/test_dashboard_chassis_transport.py` (baru, 3 tes + 1 yang
+  dilewati di luar Linux).
+
+Catatan operasional: `git pull` **tidak** mengubah proses yang sedang
+berjalan. Dashboard yang sudah jalan tetap memakai kode lamanya sampai
+dihentikan dan dijalankan ulang — inilah alasan perbaikan lease belum terasa
+walaupun sudah ter-pull.
+
+Verifikasi: `376 passed`, `1 skipped`; `All checks passed!` untuk Ruff; smoke
+test exit 0.
+
+Tidak ada aktuasi dari repo ini. Tidak ada commit, push, reset, clean, atau
+pergantian branch.

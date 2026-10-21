@@ -19,6 +19,7 @@ Design notes
 
 from __future__ import annotations
 
+import errno
 import random
 
 from nicegui import app, context, ui
@@ -630,4 +631,17 @@ def run(
         print("  Keep the physical E-stop within reach. The robot moves while a")
         print("  direction button is held, and stops when it is released.")
         print("=" * 72)
-    ui.run(host=host, port=port, title="AMR LKS Dashboard", reload=reload, show=False)
+    try:
+        ui.run(host=host, port=port, title="AMR LKS Dashboard", reload=reload, show=False)
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            print(f"ERROR: port {port} is already in use - another dashboard is running.")
+            print(f"  find it:  fuser -v {port}/tcp")
+            print(f"  stop it:  fuser -k {port}/tcp")
+            raise SystemExit(1) from exc
+        raise
+    finally:
+        # Whatever happens -- clean exit, bind failure, Ctrl+C -- the chassis
+        # port is closed and a stop frame is sent. The robot is never left
+        # with a live command.
+        robot_runtime.close_adapters()
