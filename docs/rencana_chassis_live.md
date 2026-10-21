@@ -316,13 +316,37 @@ sehingga offset 4,89 cm belum tersingkir.
 
 | # | Temuan | Status | Dampak |
 | --- | --- | --- | --- |
-| F1 | **Roda depan kanan (motor 3) tidak berputar** saat mundur; robot melenceng ke kanan | OPEN — perlu isolasi per motor | G1 (identifikasi tanda) **harus ditunda**; pola tanda dihitung untuk 4 roda yang jalan |
-| F2 | **Robot lambat** di slider penuh (0,19 m/s) | OPEN — belum ada angka jarak/waktu | Kemungkinan besar F1: roda mecanum yang mati **diseret menyamping** → gesekan besar |
-| F3 | **Suara mesin tetap berbunyi** setelah berhenti, hilang saat bagian belakang sedikit terangkat | FIXED di kode | Penyebab: adapter mengirim frame kecepatan-nol terus-menerus saat idle → driver tetap teregang → robot mendengung. Sekarang idle = diam, dan watchdog board yang menahan motor mati. F3 juga bisa menunjuk roda yang macet (kannot(k)ak) — perlu dibedakan lewat uji "matikan dashboard, masih berbunyi atau tidak" |
-| F4 | Fail-safe belum diuji | OPEN | Prosedur sudah ada (tab ditutup / Wi-Fi mati / E-stop dari tab lain / proses di-Ctrl+C) |
+| F1 | **Roda depan kanan (motor 3) tidak berputar** saat mundur; robot melenceng ke kanan | OPEN — **motor dan kabel dinyatakan aman**: dengan keempat roda terangkat, keempat motor berputar normal | Penyebabnya di **roda/roller**, bukan di motor: suspect utama roller FR terpasang sudut atau handedness yang salah (susunan ABAB di repo ini **berasal dari PDF, belum pernah diverifikasi di robot ini**), roller nyangkut, atau bearing pelek kasar |
+| F2 | **Robot lambat** di slider penuh | OPEN | Kemungkinan besar ikut F1: roda mecanum yang macet **diseret menyamping** → gesekan besar |
+| F3 | **Suara mesin tetap berbunyi** setelah berhenti, hilang saat bagian belakang sedikit terangkat | FIXED di kode (stream idle → diam) | Penyebab: adapter mengirim frame kecepatan-nol terus-menerus saat idle → driver tetap teregang → robot mendengung. Tapi F3 juga bisa menunjuk roda yang macet — perlu dibedakan lewat uji "matikan dashboard, masih berbunyi atau tidak" |
+| F4 | **Nyendet di semua arah** (lateral, putar kanan, putar kiri) dan saat jalan di arena | OPEN | Kemungkinan besar efek F1 yang sama: roda yang macet ikut di semua pola. Tapi "nyendet" juga masalah terbuka yang sudah dikenal (sesi 2 §9.6, terlihat sejak roda terangkat) — dua-duanya harus dibedakan |
+| F5 | Fail-safe "Ctrl+W" **berhasil**: robot berhenti tepat | **LOLOS** | Kabar baik: event "lepas" yang hilang tertangani |
+| F6 | Setelah Ctrl+W, dashboard **terkunci**: "Control is held by another session" | FIXED di kode | Lease kendali tidak dilepas saat tab ditutup, dan tidak kedaluwarsa → sesi baru tidak bisa mengambil alih |
 
-**Prasyarat sebelum G1:** F1 selesai dan keempat roda terbukti berputar.
-Tanpa itu, identifikasi tanda menghasilkan data yang tidak trustworthy.
+### 7.4 Angka slider penuh — belum konsisten, dan kenapa
+
+Percobaan kedua (slider penuh 0,19 m/s): **63 cm**, durasi tahan **tidak dicatat**.
+
+| Percobaan | Perintah | Jarak | Efisiensi implisit (`C_eff` = 20,72 cm) |
+| --- | --- | --- | --- |
+| 0,06 m/s | u = 0,327 rps | 18,0 cm | **0,885** |
+| 0,19 m/s | u = 1,000 rps | 63 cm | **1,013** ← lebih besar dari 1, **tidak mungkin secara fisis** |
+
+Efisiensi > 1 berarti robot bergerak lebih jauh dari yang diperintahkan. Dua
+penjelasan yang mungkin:
+
+1. **Durasi tahan lebih lama dari 3 detik.** 63 cm pada efisiensi 0,885 butuh
+   tahan **3,43 s**. Stopwatch adalah sumber galat yang paling mungkin.
+2. Robot **terloncat-hop** karena roda yang macet, sehingga jarak terukur lebih
+   dari jarak kinematika.
+
+Karena itu panel sekarang menampilkan **waktu tahan langsung** (`hold 3.4 s`),
+supaya operator tidak perlu stopwatch. Catatan yang dipakai: **waktu dari
+panel + jarak dari meteran**, bukan jarak + tebakan waktu.
+
+**Prasyarat sebelum G1:** F1 selesai dan keempat roda terbukti berputar di
+lantai. Tanpa itu, identifikasi tanda menghasilkan data yang menyesatkan, dan
+semua angka jarak/laju P6 perlu diulang.
 
 ---
 

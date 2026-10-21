@@ -37,6 +37,18 @@ def test_only_one_session_may_hold_control() -> None:
     assert guard.lease_owner == "session-a"
 
 
+def test_a_lease_from_a_dead_session_is_taken_over() -> None:
+    """A closed tab must not lock the dashboard for ever.
+
+    The dead session's heartbeat stops, so its lease is no longer a live
+    controller and the next session may take it.
+    """
+    guard, clock = _armed_guard(timeout=0.3)
+    clock.advance(1.0)
+    assert guard.arm("session-b") is True
+    assert guard.lease_owner == "session-b"
+
+
 def test_motion_requires_the_lease() -> None:
     guard, _clock = _armed_guard()
     assert guard.request_motion("session-b", ChassisCommand(0.1, 0, 0)) is False
@@ -115,6 +127,13 @@ def test_disarming_releases_the_lease() -> None:
     assert guard.disarm("session-a") is True
     assert guard.lease_owner is None
     assert guard.disarm("session-a") is False
+
+
+def test_disarming_also_stops_the_motion() -> None:
+    guard, _clock = _armed_guard()
+    assert guard.request_motion("session-a", ChassisCommand(0.1, 0, 0)) is True
+    assert guard.disarm("session-a") is True
+    assert guard.poll() is None
 
 
 def test_reset_motion_clears_the_command_but_keeps_the_lease() -> None:

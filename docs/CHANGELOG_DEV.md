@@ -1119,3 +1119,41 @@ Verifikasi: `371 passed`; `All checks passed!` untuk Ruff.
 
 Tidak ada aktuasi dari repo ini. Tidak ada commit, push, reset, clean, atau
 pergantian branch.
+
+## 23. Lease kendali yang bisa terkunci, penghitung waktu hold, dan catatan P6 (21 Oktober 2026)
+
+**Bug yang ditemukan di lapangan — dashboard terkunci setelah tab ditutup.**
+
+Uji fail-safe "Ctrl+W" (tutup tab sambil tombol ditekan) **berhasil**: robot
+berhenti tepat. Tapi membuka dashboard lagi langsung ditolak dengan
+"Control is held by another session". Sebabnya: `on_disconnect` hanya
+menghentikan gerakan, tapi **lease** kendali tetap dipegang sesi yang sudah
+mati, dan lease itu tidak pernah kedaluwarsa.
+
+- `src/amr_core/robot/motion_guard.py` — `arm()` sekarang mengambil alih
+  lease yang heartbeat-nya sudah kedaluwarsa. Lease yang tidak hidup bukan
+  lagi pengendali, jadi tidak boleh mengunci dashboard selamanya.
+- `src/amr_dashboard/app.py` — `on_disconnect` sekarang **melepas lease**,
+  bukan hanya menghentikan gerakan.
+- Tes: `test_a_lease_from_a_dead_session_is_taken_over` dan
+  `test_disarming_also_stops_the_motion`.
+
+**Penghitung waktu hold di panel.** Stopwatch adalah sumber galat yang paling
+mungkin pada pengukuran jarak: percobaan slider penuh (63 cm) dan percobaan
+kecepatan rendah (18,0 cm) tidak konsisten satu sama lain karena durasi
+tahannya tidak dicatat. Panel kini menampilkan waktu tahan langsung
+(`hold 3.4 s`), jadi yang dicatat adalah **waktu dari panel + jarak dari
+meteran**.
+
+- `src/amr_dashboard/chassis_panel.py` — status bar menampilkan waktu tahan,
+  kecepatan yang diminta, dan rate roda yang dikirim.
+
+**Catatan P6 yang diperbarui** (`docs/rencana_chassis_live.md` §7.3–§7.4):
+keempat motor berputar normal saat roda terangkat, jadi motor dan kabel aman
+dan masalahnya ada di roda/roller; nyendet terjadi di semua arah; fail-safe
+Ctrl+W lolos; semua angka jarak perlu diulang setelah roda diperbaiki.
+
+Verifikasi: `373 passed`; `All checks passed!` untuk Ruff.
+
+Tidak ada aktuasi dari repo ini. Tidak ada commit, push, reset, clean, atau
+pergantian branch.

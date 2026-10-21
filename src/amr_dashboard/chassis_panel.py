@@ -29,6 +29,7 @@ robot, and the board's own watchdog stops the motors if the frames stop.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 from nicegui import context, ui
@@ -65,6 +66,8 @@ class _Hold:
 
     session_id: str
     active: str | None = None
+    started_at: float | None = None
+    speed_mps: float = MIN_SPEED_MPS
 
 
 def chassis_control_panel(adapters: RobotAdapters) -> None:
@@ -124,6 +127,13 @@ def chassis_control_panel(adapters: RobotAdapters) -> None:
         _install_heartbeat(adapters, session_id, status)
         _install_hold_buttons(adapters, hold, speed, status)
         _install_stop_button(adapters, hold, status)
+        # Refresh the hold timer while a button is held, so the operator can
+        # read the exact hold time instead of trusting a stopwatch. The time
+        # and the ruler distance together give the speed that was achieved.
+        ui.timer(
+            0.1,
+            lambda: _refresh_status(adapters, hold, status, moving=hold.active is not None),
+        )
         ui.separator()
         _estop_controls(adapters, status)
 
@@ -145,8 +155,8 @@ def _command_for(axis: tuple[float, float, float], speed: float) -> ChassisComma
 def _install_hold_buttons(
     adapters: RobotAdapters,
     hold: _Hold,
-    speed: ui.slider,
-    status: ui.label,
+    speed,
+    status,
 ) -> None:
     """Build the six hold-to-move buttons."""
     guard = adapters.guard
@@ -158,7 +168,8 @@ def _install_hold_buttons(
             ui.notify("Control is held by another session.", color="negative", position="top")
             return
         guard.heartbeat(hold.session_id)
-        command = _command_for(axis, float(speed.value or MIN_SPEED_MPS))
+        target_speed = float(speed.value or MIN_SPEED_MPS)
+        command = _command_for(axis, target_speed)
         # The guard decides whether the robot may move; the adapter validates
         # and clamps what actually reaches the wire.
         if not guard.request_motion(hold.session_id, command):
@@ -174,10 +185,13 @@ def _install_hold_buttons(
             ui.notify(outcome.reason, color="negative", position="top")
             return
         hold.active = name
+        hold.speed_mps = target_speed
+        hold.started_at = time.monotonic()
         _refresh_status(adapters, hold, status, moving=True)
 
     def _stop() -> None:
         hold.active = None
+        hold.started_at = None
         guard.release_motion(hold.session_id)
         _refresh_status(adapters, hold, status, moving=False)
 
@@ -189,7 +203,7 @@ def _install_hold_buttons(
         button.on("pointercancel", lambda e: _stop())
 
 
-def _install_stop_button(adapters: RobotAdapters, hold: _Hold, status: ui.label) -> None:
+def _install_stop_button(adapters: RobotAdapters, hold: _Hold, status) -> None:
     def _stop_now() -> None:
         hold.active = None
         guard = adapters.guard
@@ -201,7 +215,7 @@ def _install_stop_button(adapters: RobotAdapters, hold: _Hold, status: ui.label)
     ui.button("STOP", icon="stop", on_click=_stop_now).props("color=orange")
 
 
-def _install_heartbeat(adapters: RobotAdapters, session_id: str, status: ui.label) -> None:
+def _install_heartbeat(adapters: RobotAdapters, session_id: str, status) -> None:
     """Wire the client heartbeat and the global release net.
 
     Two hidden elements carry the events: one is ticked every 100 ms by the
@@ -251,7 +265,7 @@ def _release_all(adapters: RobotAdapters, session_id: str) -> None:
 def _refresh_status(
     adapters: RobotAdapters,
     hold: _Hold,
-    status: ui.label,
+    status,
     *,
     moving: bool,
 ) -> None:
@@ -259,15 +273,19 @@ def _refresh_status(
     if guard is None:
         return
     age = guard.heartbeat_age()
-    rate = command_for_speed(float(MIN_SPEED_MPS))
+    rate = command_for_speed(hold.speed_mps)
     stall_note = "" if is_above_stall_threshold(rate) else "  (below the stall threshold)"
+    elapsed = ""
+    if moving and hold.started_at is not None:
+        elapsed = f"  |  hold {time.monotonic() - hold.started_at:5.1f} s"
     status.set_text(
-        f"{'MOVING' if moving else 'idle'}  |  heartbeat {age:.2f} s  |  "
-        f"wheel rate {rate:.2f} rps{stall_note}  |  {guard.stopped_reason}"
+        f"{'MOVING' if moving else 'idle'}{elapsed}  |  "
+        f"command {hold.speed_mps:.2f} m/s -> {rate:.2f} rps{stall_note}  |  "
+        f"heartbeat {age:.2f} s  |  {guard.stopped_reason}"
     )
 
 
-def _estop_controls(adapters: RobotAdapters, status: ui.label | None = None) -> None:
+def _estop_controls(adapters: RobotAdapters, status=None) -> None:
     estop = adapters.estop
     guard = adapters.guard
     if estop.latched:

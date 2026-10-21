@@ -572,10 +572,12 @@ def _stop_lidar() -> None:
 
 
 def _on_client_disconnect(client=None) -> None:
-    """Stop the robot when a browser goes away.
+    """Stop the robot and give up control when a browser goes away.
 
     The client heartbeat would also expire a moment later, but a browser that
-    closes cleanly should not leave the robot rolling in the meantime.
+    closes cleanly should not leave the robot rolling in the meantime -- and
+    it must not keep the control lease either, or the next dashboard to open
+    would be told that control is held by a session that no longer exists.
     """
     guard = robot_runtime.get_adapters().guard
     if guard is None:
@@ -583,7 +585,7 @@ def _on_client_disconnect(client=None) -> None:
     session_id = getattr(client, "id", None) if client is not None else None
     if session_id is None:
         return
-    guard.release_motion(session_id)
+    guard.disarm(session_id)
 
 
 def _stop_chassis() -> None:

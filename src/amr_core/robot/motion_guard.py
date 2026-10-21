@@ -104,8 +104,14 @@ class MotionGuard:
     # --- lease ------------------------------------------------------------- #
 
     def arm(self, session_id: str) -> bool:
-        """Take the control lease. False if another session already holds it."""
-        if self._state.lease_owner not in (None, session_id):
+        """Take the control lease. False if another session already holds it.
+
+        A lease whose heartbeat has expired is not a live controller: the
+        browser is gone, the network dropped or the laptop slept. Such a lease
+        is taken over instead of locking the dashboard forever.
+        """
+        owner = self._state.lease_owner
+        if owner not in (None, session_id) and self.heartbeat_fresh():
             return False
         self._state.lease_owner = session_id
         self._state.stopped_reason = ""
