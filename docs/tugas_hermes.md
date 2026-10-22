@@ -67,6 +67,26 @@ menghasilkan data yang menyesatkan.
 
 ---
 
+## 2b. Checklist roda depan kanan (motor 3)
+
+Hanya kalau TUGAS 2 menunjukkan motor 3 tidak berputar di lantai. Roda harus
+terangkat, motor **mati**, tidak ada perintah motor.
+
+| # | Periksa | Kalau benar | Kalau salah |
+| --- | --- | --- | --- |
+| 1 | Putar roda FR dengan tangan | berputar bebas | berat/tersendat → bearing atau runner |
+| 2 | Bandingkan susunan roller FR dengan FL | diagonal sepasang (pola ABAB) | satu roda terpasang terbalik → **susunan roller tidak ABAB di robot ini**, dan itu bisa jadi akar masalah |
+| 3 | Cek celah roller | bersih | rambut/kotorak tersangkut |
+| 4 | Cek baut runner | rapat | longgar → kencangkan |
+| 5 | Cek gohay roda | tidak goyah | goyah → bearing aus |
+
+Pola ABAB yang tertulis di dokumen berasal dari PDF pabrikan, **belum pernah
+diverifikasi di robot ini**. Kalau roda FR memang dipasang berbeda dari tiga
+roda lainnya, itu penjelasan yang paling mungkin untuk semua gejala: nyendet
+di semua arah, robot lambat, dan melenceng.
+
+---
+
 ## 3. TUGAS 1 — Nyendet: dari server atau dari robot?
 
 Pertanyaan: nyendet terjadi karena **frame motor yang jatuh** (server) atau

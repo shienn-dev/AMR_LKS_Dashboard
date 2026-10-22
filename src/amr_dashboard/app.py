@@ -40,7 +40,7 @@ from amr_dashboard import (
 )
 from amr_dashboard.runtime import get_runtime, start_server_loop, stop_server_loop
 
-TICK_INTERVAL_S = 0.5  # per-page display refresh interval (seconds)
+TICK_INTERVAL_S = 1.0  # per-page display refresh interval (seconds)
 
 
 class DashboardState:

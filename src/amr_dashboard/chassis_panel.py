@@ -131,7 +131,7 @@ def chassis_control_panel(adapters: RobotAdapters) -> None:
         # read the exact hold time instead of trusting a stopwatch. The time
         # and the ruler distance together give the speed that was achieved.
         ui.timer(
-            0.1,
+            0.25,
             lambda: _refresh_status(adapters, hold, status, moving=hold.active is not None),
         )
         ui.separator()
