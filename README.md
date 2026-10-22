@@ -106,13 +106,26 @@ AMR_LIDAR_PORT=/dev/ttyUSB1 AMR_LIDAR_BAUD=230400 ~/AMRTestLander/.venv/bin/pyth
 This is the single switch that makes the dashboard actuator-facing. Start-up
 prints a loud warning and the chassis panel becomes hold-to-move: the robot
 moves while a direction button is held (maju / mundur / kiri / kanan / putar)
-and stops when it is released. Fail-safes: browser heartbeat, control lease per
-session, software E-stop latch, and the board watchdog.
+and stops when it is released. Fail-safes: browser heartbeat (0.8 s timeout),
+control lease per session, software E-stop latch, and the board watchdog. The
+status bar reports the measured stream rate, the largest gap between frames, the
+frame count and the hold time — the stream figures are what separate "the wheels
+stutter" from "frames were dropped and the board's watchdog cut the motors".
 
 Speed slider range is **0.06 – 0.19 m/s**, and 0.19 m/s is the highest value
-ever measured on this robot — it is a hard cap, not a suggestion. Lateral and
-yaw sign conventions have **not** been verified on the floor yet; gate G1 in
-`docs/rencana_chassis_live.md` must be cleared before trusting those directions.
+ever measured on this robot — it is a hard cap, not a suggestion.
+
+Sign conventions, as far as the floor has confirmed them:
+
+| Direction | Status |
+| --- | --- |
+| Forward / backward | verified on the floor |
+| Yaw left / right | verified on the floor |
+| Strafe left / right | **was inverted**, corrected in `kinematics.LATERAL_SIGN = -1`, **not yet re-tested** |
+
+So do not treat "kiri"/"kanan" as trusted until that correction has been driven
+on the floor. Keep the robot's own watchdog as the last line: it stops the
+motors when frames stop arriving, independent of anything in the browser.
 
 ### Two dashboards, one robot
 
@@ -145,7 +158,7 @@ starts and the LiDAR panel reports "unavailable" instead of failing.
 
 ```bash
 cd ~/AMRTestLander/AMR_LKS_Dashboard
-~/AMRTestLander/.venv/bin/python -m pytest -q        # unit tests (currently 377 passed)
+~/AMRTestLander/.venv/bin/python -m pytest -q        # unit tests (currently 379 passed)
 ~/AMRTestLander/.venv/bin/ruff check .               # lint (E,F,I,UP,B; line-length 100)
 ~/AMRTestLander/.venv/bin/python scripts/smoke_dashboard.py   # server + GET '/' (HTTP 200, exit 0)
 ```
